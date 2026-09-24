@@ -1,17 +1,16 @@
+import io
+import re
+import requests
 import telebot
 from telebot import types
-import easyocr
-import re
-from PIL import Image
 
-# ⚠️ Укажи актуальный токен бота и свой ID
-TOKEN = '8895895178:AAHYlkLlTbGCCNpyMYLIZF4NHbZ5PZmmvL8'
-ADMIN_CHAT_ID = 5267181585
+# ==================== НАСТРОЙКИ ====================
+TOKEN = "8895895178:AAHYlkLlTbGCCNpyMYLIZF4NHbZ5PZmmvL8"            # Вставь токен от @BotFather
+ADMIN_CHAT_ID = 5267181585             # Твой Telegram ID
+OCR_API_KEY = "K83218609288957" # Вставь скопированный ключ из письма
+# ====================================================
 
 bot = telebot.TeleBot(TOKEN)
-
-# Инициализируем нейросеть для распознавания цифр и текста
-reader = easyocr.Reader(['en', 'ru'], gpu=False)
 
 @bot.message_handler(commands=['start'])
 def start_command(message):
@@ -64,30 +63,38 @@ def handle_text(message):
 @bot.message_handler(content_types=['photo'])
 def handle_photo(message):
     chat_id = message.chat.id
-    bot.send_message(chat_id, "🔍 Сканирую скриншот и считаю кубки...")
+    bot.send_message(chat_id, "🔍 Сканирую скриншот...")
     
     try:
-        # Скачиваем отправленное фото
+        # Скачиваем фото в оперативную память
         file_info = bot.get_file(message.photo[-1].file_id)
         downloaded_file = bot.download_file(file_info.file_path)
         
-        # Считываем весь текст/цифры с картинки
-        results = reader.readtext(downloaded_file, detail=0)
+        # Отправляем фото в быструю бесплатную OCR
+        response = requests.post(
+            'https://api.ocr.space/parse/image',
+            files={'filename': ('image.jpg', downloaded_file, 'image/jpeg')},
+            data={'apikey': OCR_API_KEY, 'language': 'eng', 'OCREngine': 2},
+            timeout=10
+        )
         
-        # Ищем числа на скриншоте
+        result = response.json()
+        parsed_text = ""
+        if result.get("ParsedResults"):
+            parsed_text = result["ParsedResults"][0]["ParsedText"]
+            
+        # Ищем числа на скриншоте (диапазон кубков)
         numbers = []
-        for text in results:
-            cleaned = re.sub(r'\D', '', text)
+        for line in parsed_text.splitlines():
+            cleaned = re.sub(r'\D', '', line)
             if cleaned:
                 val = int(cleaned)
-                # Фильтруем адекватный диапазон кубков
                 if 500 <= val <= 150000:
                     numbers.append(val)
         
         username = f"@{message.from_user.username}" if message.from_user.username else "без юзернейма"
 
         if numbers:
-            # Берём максимальное подходящее число (обычно это кубки)
             trophies = max(numbers)
             
             # Формула расчета: 25 кубков = 1 грн = 2 руб
@@ -100,11 +107,11 @@ def handle_photo(message):
                 f"💰 **Предварительная оценка:**\n"
                 f"• **{price_uah} грн**\n"
                 f"• **{price_rub} руб**\n\n"
-                f"Заявка с фото передана администратору! Ожидайте ответа ⏳"
+                f"Заявка передана администратору! ⏳"
             )
             bot.send_message(chat_id, info_text, parse_mode="Markdown")
             
-            # Отправка скриншота админу с найденными данными
+            # Сообщение администратору
             caption_text = (
                 f"📩 **Новая заявка!**\n"
                 f"От: {username}\n"
@@ -116,7 +123,6 @@ def handle_photo(message):
             bot.send_photo(ADMIN_CHAT_ID, message.photo[-1].file_id, caption=caption_text, parse_mode="Markdown")
             
         else:
-            # Если нейросеть не смогла с уверенностью вытащить цифры
             bot.send_message(
                 chat_id, 
                 "❌ Не удалось четко распознать кубки. Заявка отправлена администратору на ручную проверку ⏳"
