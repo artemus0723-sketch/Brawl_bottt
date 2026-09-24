@@ -1,16 +1,12 @@
 import telebot
 from telebot import types
-import brawlstats
+import requests
 
-# ⚠️ ВСТАВЬ СВОИ ДАННЫЕ:
+# ⚠️ ВСТАВЬ СВОЙ ТОКЕН ИЗ @BotFather
 TOKEN = '8895895178:AAHYlkLlTbGCCNpyMYLIZF4NHbZ5PZmmvL8'
-BS_API_KEY = 'eyJ0eXAiOiJKV1QiLCJhbGciOiJIUzUxMiIsImtpZCI6IjI4YTMxOGY3LTAwMDAtYTFlYi03ZmExLTJjNzQzM2M2Y2NhNSJ9.eyJpc3MiOiJzdXBlcmNlbGwiLCJhdWQiOiJzdXBlcmNlbGw6Z2FtZWFwaSIsImp0aSI6IjMwZDQ4OTkwLThmMjEtNDRlMy04YjNkLTdjODEwMjgzMjg2YyIsImlhdCI6MTc5MDI0NzYwMiwic3ViIjoiZGV2ZWxvcGVyL2E3ZDhiZjE2LWVjNjktNGM2Zi1iMzg3LTE5N2QzNjQ5ZWFlMiIsInNjb3BlcyI6WyJicmF3bHN0YXJzIl0sImxpbWl0cyI6W3sidGllciI6ImRldmVsb3Blci9zaWx2ZXIiLCJ0eXBlIjoidGhyb3R0bGluZyJ9LHsiY2lkcnMiOlsiOTQuMTc4LjE2My4yNSJdLCJ0eXBlIjoiY2xpZW50In1dfQ.m3lx918wvXTLPPiBljw3au1wR7-mS03E_Ck9U4_ooHjU1pcKJnPUr6-bFJd64wWEvs4h_e6v-Q-NF_40IIXi2w'
 ADMIN_CHAT_ID = 5267181585
 
 bot = telebot.TeleBot(TOKEN)
-# Официальный клиент Brawl Stars API
-bs_client = brawlstats.Client(BS_API_KEY)
-
 user_states = {}
 
 @bot.message_handler(commands=['start'])
@@ -65,32 +61,38 @@ def handle_text(message):
         
         bot.send_message(message.chat.id, "🔍 Поиск аккаунта и расчет стоимости...")
         
+        # Надежный обоход блокировки Cloudflare
+        url = f"https://corsproxy.io/?https://api.brawlify.com/v1/player/{clean_tag}"
+        
         try:
-            # Прямой запрос через официальную библиотеку
-            player = bs_client.get_player(clean_tag)
+            res = requests.get(url, timeout=10)
             
-            name = player.name
-            trophies = player.trophies
-            
-            price_uah = round(trophies / 25, 2)
-            price_rub = round(price_uah * 2, 2)
-            
-            info_text = (
-                f"📊 **Данные аккаунта:**\n"
-                f"👤 Ник: **{name}**\n"
-                f"🏆 Кубки: **{trophies}**\n\n"
-                f"💰 **Предварительная оценка:**\n"
-                f"• **{price_uah} грн**\n"
-                f"• **{price_rub} руб**\n\n"
-                f"Если устраивает цена — отправь скриншот профиля для подтверждения сделки!"
-            )
-            bot.send_message(message.chat.id, info_text, parse_mode="Markdown")
-            user_states[message.chat.id] = 'waiting_for_photo'
-            
-        except brawlstats.NotFoundError:
-            bot.send_message(message.chat.id, "❌ Игрок с таким тегом не найден! Проверьте правильность тега.")
+            if res.status_code == 200:
+                data = res.json()
+                name = data.get('name', 'Неизвестно')
+                trophies = data.get('trophies', 0)
+                
+                price_uah = round(trophies / 25, 2)
+                price_rub = round(price_uah * 2, 2)
+                
+                info_text = (
+                    f"📊 **Данные аккаунта:**\n"
+                    f"👤 Ник: **{name}**\n"
+                    f"🏆 Кубки: **{trophies}**\n\n"
+                    f"💰 **Предварительная оценка:**\n"
+                    f"• **{price_uah} грн**\n"
+                    f"• **{price_rub} руб**\n\n"
+                    f"Если устраивает цена — отправь скриншот профиля для подтверждения сделки!"
+                )
+                bot.send_message(message.chat.id, info_text, parse_mode="Markdown")
+                user_states[message.chat.id] = 'waiting_for_photo'
+            else:
+                bot.send_message(
+                    message.chat.id, 
+                    "❌ Игрок не найден! Перепроверьте тег в профиле игры."
+                )
         except Exception as e:
-            bot.send_message(message.chat.id, f"❌ Ошибка при получении данных: {e}")
+            bot.send_message(message.chat.id, f"❌ Ошибка сети: {e}")
             
     else:
         bot.send_message(message.chat.id, "Воспользуйтесь кнопками меню ниже ⬇️")
