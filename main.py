@@ -1,21 +1,24 @@
 import telebot
 from telebot import types
-import requests
+import easyocr
+import re
+from PIL import Image
 
-# ⚠️ Не забудь вставить актуальный ТОКЕН БОТА, если менял его в @BotFather
+# ⚠️ Укажи актуальный токен бота и свой ID
 TOKEN = '8895895178:AAHYlkLlTbGCCNpyMYLIZF4NHbZ5PZmmvL8'
-SCRAPER_API_KEY = '677695654a92c1e942f85917ab64dc98'
 ADMIN_CHAT_ID = 5267181585
 
 bot = telebot.TeleBot(TOKEN)
-user_states = {}
+
+# Инициализируем нейросеть для распознавания цифр и текста
+reader = easyocr.Reader(['en', 'ru'], gpu=False)
 
 @bot.message_handler(commands=['start'])
 def start_command(message):
     markup = types.ReplyKeyboardMarkup(resize_keyboard=True, row_width=2)
     btn_admin = types.KeyboardButton("связь с админом")
     btn_rules = types.KeyboardButton("Правила📑")
-    btn_sell = types.KeyboardButton("👾Продать аккаунт (Авто-оценка)👾")
+    btn_sell = types.KeyboardButton("👾Продать аккаунт (По фото)👾")
     
     markup.add(btn_admin, btn_rules)
     markup.add(btn_sell)
@@ -23,14 +26,14 @@ def start_command(message):
     bot.send_message(
         message.chat.id, 
         "Привет! Мы быстро оцениваем и покупаем аккаунты Brawl Stars 💸\n\n"
-        "Нажми кнопку ниже, чтобы узнать стоимость твоего аккаунта по тегу!", 
+        "Отправь скриншот своего профиля из игры, и я автоматически посчитаю стоимость!", 
         reply_markup=markup,
         parse_mode="Markdown"
     )
 
 @bot.message_handler(content_types=['text'])
 def handle_text(message):
-    # Ответ админа через "Ответить" (Reply)
+    # Ответ админа пользователю через "Ответить" (Reply)
     if message.chat.id == ADMIN_CHAT_ID and message.reply_to_message:
         try:
             first_line = message.reply_to_message.caption or message.reply_to_message.text or ""
@@ -49,75 +52,83 @@ def handle_text(message):
         bot.send_message(message.chat.id, "Администратор: @yrodochk")
     elif message.text == "Правила📑":
         bot.send_message(message.chat.id, "Покупаем аккаунты только от 5000🏆 с полными данными!")
-    elif message.text == "👾Продать аккаунт (Авто-оценка)👾":
-        user_states[message.chat.id] = 'waiting_for_tag'
+    elif message.text == "👾Продать аккаунт (По фото)👾":
         bot.send_message(
             message.chat.id, 
-            "Введи ваш **Тег игрока** из игры (например `#2PP08L9U` или `2PP08L9U`):\n\n"
-            "*(Его можно скопировать в профиле игры под аватаркой)*",
-            parse_mode="Markdown"
+            "📸 **Отправь скриншот твоего профиля Brawl Stars.**\n\n"
+            "Убедись, что на фото хорошо видно количество кубков!"
         )
-    elif user_states.get(message.chat.id) == 'waiting_for_tag':
-        clean_tag = message.text.strip().replace('#', '').replace(' ', '').upper()
-        
-        bot.send_message(message.chat.id, f"🔍 Поиск аккаунта `{clean_tag}`...", parse_mode="Markdown")
-        
-        target_url = f"https://api.brawlapi.com/v1/player/%23{clean_tag}"
-        proxy_url = f"http://api.scraperapi.com?api_key={SCRAPER_API_KEY}&url={target_url}"
-        
-        try:
-            res = requests.get(proxy_url, timeout=20)
-            
-            if res.status_code == 200:
-                data = res.json()
-                name = data.get('name', 'Неизвестно')
-                trophies = data.get('trophies', 0)
-                
-                # Формула расчета
-                price_uah = round(trophies / 25, 2)
-                price_rub = round(price_uah * 2, 2)
-                
-                info_text = (
-                    f"📊 **Данные аккаунта:**\n"
-                    f"👤 Ник: **{name}**\n"
-                    f"🏆 Кубки: **{trophies}**\n\n"
-                    f"💰 **Предварительная оценка:**\n"
-                    f"• **{price_uah} грн**\n"
-                    f"• **{price_rub} руб**\n\n"
-                    f"Если устраивает цена — отправь скриншот профиля для подтверждения сделки!"
-                )
-                bot.send_message(message.chat.id, info_text, parse_mode="Markdown")
-                user_states[message.chat.id] = 'waiting_for_photo'
-            else:
-                bot.send_message(
-                    message.chat.id, 
-                    "❌ Игрок не найден! Перепроверьте тег в профиле игры."
-                )
-        except Exception as e:
-            bot.send_message(message.chat.id, f"❌ Ошибка подключения к серверу: {e}")
-            
     else:
-        bot.send_message(message.chat.id, "Воспользуйтесь кнопками меню ниже ⬇️")
+        bot.send_message(message.chat.id, "Отправь скриншот профиля или воспользуйся кнопками меню ⬇️")
 
 @bot.message_handler(content_types=['photo'])
 def handle_photo(message):
     chat_id = message.chat.id
-    if user_states.get(chat_id) == 'waiting_for_photo':
-        photo_id = message.photo[-1].file_id
+    bot.send_message(chat_id, "🔍 Сканирую скриншот и считаю кубки...")
+    
+    try:
+        # Скачиваем отправленное фото
+        file_info = bot.get_file(message.photo[-1].file_id)
+        downloaded_file = bot.download_file(file_info.file_path)
+        
+        # Считываем весь текст/цифры с картинки
+        results = reader.readtext(downloaded_file, detail=0)
+        
+        # Ищем числа на скриншоте
+        numbers = []
+        for text in results:
+            cleaned = re.sub(r'\D', '', text)
+            if cleaned:
+                val = int(cleaned)
+                # Фильтруем адекватный диапазон кубков
+                if 500 <= val <= 150000:
+                    numbers.append(val)
+        
         username = f"@{message.from_user.username}" if message.from_user.username else "без юзернейма"
-        
-        caption_text = (
-            f"📩 **Новая заявка на продажу!**\n"
-            f"От: {username}\n"
-            f"ID: {chat_id}\n\n"
-            f"*(Зажмите сообщение и нажмите «Ответить», чтобы написать пользователю)*"
-        )
-        
-        bot.send_photo(ADMIN_CHAT_ID, photo_id, caption=caption_text, parse_mode="Markdown")
-        bot.send_message(chat_id, "Спасибо! Ваша заявка передана администратору. Ожидайте ответа ⏳")
-        user_states[chat_id] = None
-    else:
-        bot.send_message(chat_id, "Сначала нажмите кнопку «👾Продать аккаунт (Авто-оценка)👾» и введите тег.")
+
+        if numbers:
+            # Берём максимальное подходящее число (обычно это кубки)
+            trophies = max(numbers)
+            
+            # Формула расчета: 25 кубков = 1 грн = 2 руб
+            price_uah = round(trophies / 25, 2)
+            price_rub = round(price_uah * 2, 2)
+            
+            info_text = (
+                f"📊 **Результат сканирования:**\n"
+                f"🏆 Распознано кубков: **~{trophies}**\n\n"
+                f"💰 **Предварительная оценка:**\n"
+                f"• **{price_uah} грн**\n"
+                f"• **{price_rub} руб**\n\n"
+                f"Заявка с фото передана администратору! Ожидайте ответа ⏳"
+            )
+            bot.send_message(chat_id, info_text, parse_mode="Markdown")
+            
+            # Отправка скриншота админу с найденными данными
+            caption_text = (
+                f"📩 **Новая заявка!**\n"
+                f"От: {username}\n"
+                f"ID: {chat_id}\n"
+                f"🏆 Кубков на фото: ~{trophies}\n"
+                f"💰 Оценка: {price_uah} грн / {price_rub} руб\n\n"
+                f"*(Зажмите сообщение и нажмите «Ответить», чтобы написать)*"
+            )
+            bot.send_photo(ADMIN_CHAT_ID, message.photo[-1].file_id, caption=caption_text, parse_mode="Markdown")
+            
+        else:
+            # Если нейросеть не смогла с уверенностью вытащить цифры
+            bot.send_message(
+                chat_id, 
+                "❌ Не удалось четко распознать кубки. Заявка отправлена администратору на ручную проверку ⏳"
+            )
+            bot.send_photo(
+                ADMIN_CHAT_ID, 
+                message.photo[-1].file_id, 
+                caption=f"📩 **Новая заявка (Ручная проверка)!**\nОт: {username}\nID: {chat_id}"
+            )
+            
+    except Exception as e:
+        bot.send_message(chat_id, f"❌ Ошибка обработки фото: {e}")
 
 if __name__ == '__main__':
     print("Бот успешно запущен!")
