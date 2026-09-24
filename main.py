@@ -1,8 +1,10 @@
 import telebot
 from telebot import types
 import requests
+import urllib.parse
 
-TOKEN = '8895895178:AAE59bdqWy9oPjpS-hWWzvt3ERUKOvS3Nyw'
+# ЗАМЕНИ ТОКЕН (Сгенерируй новый в @BotFather!)
+TOKEN = '8895895178:AAHYlkLlTbGCCNpyMYLIZF4NHbZ5PZmmvL8'
 ADMIN_CHAT_ID = 5267181585
 
 bot = telebot.TeleBot(TOKEN)
@@ -56,14 +58,16 @@ def handle_text(message):
             parse_mode="Markdown"
         )
     elif user_states.get(message.chat.id) == 'waiting_for_tag':
-        # Автоматическая замена частых ошибок ввода (O->0, U->V)
-        clean_tag = message.text.strip().replace('#', '').upper().replace('O', '0').replace('U', 'V')
+        # ИСПРАВЛЕНО: убрали replace('U', 'V'), меняем только 'O' на '0'
+        clean_tag = message.text.strip().replace('#', '').upper().replace('O', '0')
         
         bot.send_message(message.chat.id, "🔍 Поиск аккаунта и расчет стоимости...")
         
         try:
-            # Прямой рабочий эндпоинт Brawlify v2
-            url = f"https://api.brawlify.com/v1/players/{clean_tag}"
+            # ИСПРАВЛЕНО: Правильный URL API (player вместо players)
+            # %23 — это зародированный символ # для URL
+            encoded_tag = urllib.parse.quote(f"#{clean_tag}")
+            url = f"https://api.brawlapi.com/v1/player/{encoded_tag}"
             
             headers = {
                 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
