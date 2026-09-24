@@ -1,17 +1,11 @@
 import telebot
 from telebot import types
 import requests
-import json
 
-# ⚠️ Укажите ваш токен от BotFather
 TOKEN = '8895895178:AAE59bdqWy9oPjpS-hWWzvt3ERUKOvS3Nyw'
-
-# Ваш Telegram ID (администратор)
 ADMIN_CHAT_ID = 5267181585
 
 bot = telebot.TeleBot(TOKEN)
-
-# Словарь для отслеживания состояния пользователей
 user_states = {}
 
 @bot.message_handler(commands=['start'])
@@ -34,7 +28,7 @@ def start_command(message):
 
 @bot.message_handler(content_types=['text'])
 def handle_text(message):
-    # 1. Логика ответа администратора через функцию "Ответить" (Reply)
+    # Ответ админа через "Ответить" (Reply)
     if message.chat.id == ADMIN_CHAT_ID and message.reply_to_message:
         try:
             first_line = message.reply_to_message.caption or message.reply_to_message.text or ""
@@ -49,7 +43,6 @@ def handle_text(message):
             bot.send_message(ADMIN_CHAT_ID, f"❌ Ошибка отправки: {e}")
         return
 
-    # 2. Обработка кнопок и текстовых команд
     if message.text == "связь с админом":
         bot.send_message(message.chat.id, "Администратор: @yrodochk")
     elif message.text == "Правила📑":
@@ -63,31 +56,28 @@ def handle_text(message):
             parse_mode="Markdown"
         )
     elif user_states.get(message.chat.id) == 'waiting_for_tag':
-        # Подготовка тега (замена O на 0, удаление символа #)
-        tag = message.text.strip().replace('#', '').upper().replace('O', '0')
+        # Автоматическая замена частых ошибок ввода (O->0, U->V)
+        clean_tag = message.text.strip().replace('#', '').upper().replace('O', '0').replace('U', 'V')
         
         bot.send_message(message.chat.id, "🔍 Поиск аккаунта и расчет стоимости...")
         
         try:
-            # Запрос через универсальный CORS-прокси без защиты от IP
-            target_url = f"https://api.brawlace.com/v1/players/%23{tag}"
-            proxy_url = f"https://api.allorigins.win/get?url={requests.utils.quote(target_url)}"
+            # Прямой рабочий эндпоинт Brawlify v2
+            url = f"https://api.brawlify.com/v1/players/{clean_tag}"
             
-            response = requests.get(proxy_url, timeout=12)
+            headers = {
+                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
+            }
+            
+            response = requests.get(url, headers=headers, timeout=10)
             
             if response.status_code == 200:
-                res_json = response.json()
-                data = json.loads(res_json['contents'])
+                data = response.json()
                 
-                # Проверка наличия ошибок в ответе API
-                if 'message' in data or 'error' in data or not data.get('name'):
-                    bot.send_message(message.chat.id, "❌ Аккаунт с таким тегом не найден! Проверьте символы.")
-                    return
-
                 name = data.get('name', 'Неизвестно')
                 trophies = data.get('trophies', 0)
                 
-                # Расчет: 25 кубков = 1 грн = 2 руб
+                # Формула: 25 кубков = 1 грн = 2 руб
                 price_uah = round(trophies / 25, 2)
                 price_rub = round(price_uah * 2, 2)
                 
@@ -103,13 +93,15 @@ def handle_text(message):
                 bot.send_message(message.chat.id, info_text, parse_mode="Markdown")
                 user_states[message.chat.id] = 'waiting_for_photo'
             else:
-                bot.send_message(message.chat.id, "❌ Ошибка при получении данных. Попробуйте еще раз.")
+                bot.send_message(
+                    message.chat.id, 
+                    "❌ Аккаунт не найден! Перепроверьте тег в профиле игры (скопируйте его прямо из игры)."
+                )
         except Exception as e:
-            bot.send_message(message.chat.id, "❌ Не удалось найти аккаунт. Проверьте правильность написания тега.")
+            bot.send_message(message.chat.id, f"❌ Ошибка сети: {e}")
     else:
         bot.send_message(message.chat.id, "Воспользуйтесь кнопками меню ниже ⬇️")
 
-# Обработка отправленных фото
 @bot.message_handler(content_types=['photo'])
 def handle_photo(message):
     chat_id = message.chat.id
@@ -131,5 +123,5 @@ def handle_photo(message):
         bot.send_message(chat_id, "Сначала нажмите кнопку «👾Продать аккаунт (Авто-оценка)👾» и введите тег.")
 
 if __name__ == '__main__':
-    print("Бот запущен...")
+    print("Бот успешно запущен!")
     bot.infinity_polling(skip_pending=True)
