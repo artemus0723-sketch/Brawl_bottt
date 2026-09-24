@@ -1,6 +1,7 @@
 import telebot
 from telebot import types
 import requests
+import json
 
 # ⚠️ ВСТАВЬ СВОЙ ТОКЕН ИЗ @BotFather
 TOKEN = '8895895178:AAHYlkLlTbGCCNpyMYLIZF4NHbZ5PZmmvL8'
@@ -61,42 +62,52 @@ def handle_text(message):
         
         bot.send_message(message.chat.id, "🔍 Поиск аккаунта и расчет стоимости...")
         
-        url = f"https://api.brawlify.com/v1/player/{clean_tag}"
+        # Обходим Cloudflare 403 через Jina Reader
+        target_api = f"https://api.brawlify.com/v1/player/{clean_tag}"
+        proxy_url = f"https://r.jina.ai/{target_api}"
+        
+        headers = {
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+            'Accept': 'application/json'
+        }
         
         try:
-            res = requests.get(url, headers={'User-Agent': 'Mozilla/5.0'}, timeout=10)
-            
-            # ДЕБАГ-СООБЩЕНИЕ В ЧАТ
-            debug_msg = f"🛠 **Debug Info:**\nURL: `{url}`\nCode: `{res.status_code}`"
-            bot.send_message(message.chat.id, debug_msg, parse_mode="Markdown")
+            res = requests.get(proxy_url, headers=headers, timeout=12)
             
             if res.status_code == 200:
-                data = res.json()
-                name = data.get('name', 'Неизвестно')
-                trophies = data.get('trophies', 0)
-                
-                price_uah = round(trophies / 25, 2)
-                price_rub = round(price_uah * 2, 2)
-                
-                info_text = (
-                    f"📊 **Данные аккаунта:**\n"
-                    f"👤 Ник: **{name}**\n"
-                    f"🏆 Кубки: **{trophies}**\n\n"
-                    f"💰 **Предварительная оценка:**\n"
-                    f"• **{price_uah} грн**\n"
-                    f"• **{price_rub} руб**\n\n"
-                    f"Если устраивает цена — отправь скриншот профиля для подтверждения сделки!"
-                )
-                bot.send_message(message.chat.id, info_text, parse_mode="Markdown")
-                user_states[message.chat.id] = 'waiting_for_photo'
+                # Извлекаем JSON из ответа
+                text_content = res.text
+                if "{" in text_content and "}" in text_content:
+                    json_str = text_content[text_content.find("{"):text_content.rfind("}")+1]
+                    data = json.loads(json_str)
+                    
+                    name = data.get('name', 'Неизвестно')
+                    trophies = data.get('trophies', 0)
+                    
+                    price_uah = round(trophies / 25, 2)
+                    price_rub = round(price_uah * 2, 2)
+                    
+                    info_text = (
+                        f"📊 **Данные аккаунта:**\n"
+                        f"👤 Ник: **{name}**\n"
+                        f"🏆 Кубки: **{trophies}**\n\n"
+                        f"💰 **Предварительная оценка:**\n"
+                        f"• **{price_uah} грн**\n"
+                        f"• **{price_rub} руб**\n\n"
+                        f"Если устраивает цена — отправь скриншот профиля для подтверждения сделки!"
+                    )
+                    bot.send_message(message.chat.id, info_text, parse_mode="Markdown")
+                    user_states[message.chat.id] = 'waiting_for_photo'
+                else:
+                    bot.send_message(message.chat.id, "❌ Не удалось распарсить данные аккаунта.")
             else:
                 bot.send_message(
                     message.chat.id, 
-                    f"❌ Ошибка от API! Код: `{res.status_code}`\nОтвет: `{res.text[:150]}`",
-                    parse_mode="Markdown"
+                    "❌ Аккаунт не найден или ошибка доступа! Перепроверьте тег."
                 )
         except Exception as e:
-            bot.send_message(message.chat.id, f"❌ Ошибка отправки запроса: {e}")
+            bot.send_message(message.chat.id, f"❌ Ошибка подключения: {e}")
+            
     else:
         bot.send_message(message.chat.id, "Воспользуйтесь кнопками меню ниже ⬇️")
 
