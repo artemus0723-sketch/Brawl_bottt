@@ -1,3 +1,4 @@
-pyTelegramBotAPI
-requests
+opencv-python-headless
+aiogram
+pytesseract
 
