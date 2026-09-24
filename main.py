@@ -5,8 +5,7 @@ from telebot import types
 # Укажите ваш токен от BotFather
 TOKEN = '8895895178:AAHRB6dt-LR_17MX9pMsNJZJDPqGruQHYzk'
 
-# Укажите ваш Telegram ID (число без кавычек), куда отправлять скриншоты
-# Свой ID можно узнать у бота @userinfobot в Telegram
+# Укажите ваш Telegram ID (число без кавычек)
 ADMIN_CHAT_ID = 5267181585
 
 bot = telebot.TeleBot(TOKEN)
@@ -35,10 +34,13 @@ def handle_text(message):
     # Если сообщение пишет админ и это ответ (Reply) на сообщение бота
     if message.chat.id == ADMIN_CHAT_ID and message.reply_to_message:
         try:
-            # Извлекаем ID пользователя из текста оригинального сообщения
+            # Извлекаем текст/подпись из оригинального сообщения
             first_line = message.reply_to_message.caption or message.reply_to_message.text or ""
             if "ID:" in first_line:
-                user_id = int(first_line.split("ID:")[1].strip())
+                # Берём то, что идет после "ID:", и отсекаем переносы строк
+                raw_id = first_line.split("ID:")[1].split("\n")[0].strip()
+                user_id = int(raw_id)
+                
                 bot.send_message(user_id, f"💬 **Ответ от администратора:**\n\n{message.text}")
                 bot.send_message(ADMIN_CHAT_ID, "✅ Сообщение успешно отправлено пользователю!")
             else:
@@ -66,7 +68,7 @@ def handle_photo(message):
         photo_id = message.photo[-1].file_id
         username = f"@{message.from_user.username}" if message.from_user.username else "нет юзернейма"
         
-        # Отправляем фото админу с зашитым ID пользователя
+        # Отправляем фото админу с переносом строки после ID
         bot.send_photo(
             ADMIN_CHAT_ID, 
             photo_id, 
