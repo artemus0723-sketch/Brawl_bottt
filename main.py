@@ -57,36 +57,33 @@ def handle_text(message):
             parse_mode="Markdown"
         )
     elif user_states.get(message.chat.id) == 'waiting_for_tag':
+        # Очистка тега: убираем решетку, делаем CAPS, меняем O на 0
         clean_tag = message.text.strip().replace('#', '').upper().replace('O', '0')
         
         bot.send_message(message.chat.id, "🔍 Поиск аккаунта и расчет стоимости...")
         
         data = None
-        
-        # 1. Запрос через надёжный прокси AllOrigins
+        headers = {'User-Agent': 'Mozilla/5.0'}
+
+        # Запрос к рабочему открытому эндпоинту
         try:
-            target_url = f"https://api.brawlapi.com/v1/player/%23{clean_tag}"
-            proxy_url = f"https://api.allorigins.win/get?url={target_url}"
-            res = requests.get(proxy_url, timeout=10)
-            
+            url = f"https://api.brawlapi.com/v1/player/%23{clean_tag}"
+            res = requests.get(url, headers=headers, timeout=8)
             if res.status_code == 200:
-                import json
-                contents = res.json().get('contents')
-                if contents:
-                    data = json.loads(contents)
+                data = res.json()
         except Exception:
             pass
 
-        # 2. Резервный прямой запрос к Brawlify (если прокси не ответил)
-        if not data or 'name' not in data:
+        # Резервный запрос
+        if not data:
             try:
-                res_brawl = requests.get(f"https://api.brawlify.com/v1/player/{clean_tag}", timeout=10)
-                if res_brawl.status_code == 200:
-                    data = res_brawl.json()
+                url_alt = f"https://brawlapi.com/v1/player/{clean_tag}"
+                res_alt = requests.get(url_alt, headers=headers, timeout=8)
+                if res_alt.status_code == 200:
+                    data = res_alt.json()
             except Exception:
                 pass
 
-        # Обработка результата
         if data and ('name' in data or 'trophies' in data):
             name = data.get('name', 'Неизвестно')
             trophies = data.get('trophies', 0)
