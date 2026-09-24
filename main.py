@@ -131,7 +131,7 @@ async def process_sell_button(message: types.Message):
 
 @dp.message(F.text == "связь с админом")
 async def process_admin_contact(message: types.Message):
-    await message.answer("Для связи с администратором пишите: @admin_username")
+    await message.answer("Для связи с администратором пишите: @yrodochk")
 
 
 @dp.message(F.text == "Правила 📄")
