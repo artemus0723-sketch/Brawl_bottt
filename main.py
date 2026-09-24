@@ -88,6 +88,9 @@ async def cmd_start(message: types.Message):
 
 @dp.message(F.photo)
 async def process_screenshot(message: types.Message):
+    # ПРИНТ ДЛЯ ПРОВЕРКИ ОБНОВЛЕНИЯ КОДА:
+    print("\n[INFO] --- ЗАПУЩЕНА НОВАЯ ВЕРСИЯ КОДА (С ОБРЕЗКОЙ КАДРА) ---\n")
+
     status_msg = await message.answer("🔍 Сканирую скриншот...")
     
     # Скачиваем полученное фото во временный файл
