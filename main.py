@@ -1,12 +1,17 @@
 import telebot
 from telebot import types
 import requests
+import json
 
-# ⚠️ Укажите ваши данные
+# ⚠️ Укажите ваш токен от BotFather
 TOKEN = '8895895178:AAE59bdqWy9oPjpS-hWWzvt3ERUKOvS3Nyw'
+
+# Ваш Telegram ID (администратор)
 ADMIN_CHAT_ID = 5267181585
 
 bot = telebot.TeleBot(TOKEN)
+
+# Словарь для отслеживания состояния пользователей
 user_states = {}
 
 @bot.message_handler(commands=['start'])
@@ -29,7 +34,7 @@ def start_command(message):
 
 @bot.message_handler(content_types=['text'])
 def handle_text(message):
-    # Ответ админа пользователю через "Ответить"
+    # 1. Логика ответа администратора через функцию "Ответить" (Reply)
     if message.chat.id == ADMIN_CHAT_ID and message.reply_to_message:
         try:
             first_line = message.reply_to_message.caption or message.reply_to_message.text or ""
@@ -44,6 +49,7 @@ def handle_text(message):
             bot.send_message(ADMIN_CHAT_ID, f"❌ Ошибка отправки: {e}")
         return
 
+    # 2. Обработка кнопок и текстовых команд
     if message.text == "связь с админом":
         bot.send_message(message.chat.id, "Администратор: @yrodochk")
     elif message.text == "Правила📑":
@@ -57,24 +63,27 @@ def handle_text(message):
             parse_mode="Markdown"
         )
     elif user_states.get(message.chat.id) == 'waiting_for_tag':
-        # Подготовка тега (замена O на 0, убираем #)
+        # Подготовка тега (замена O на 0, удаление символа #)
         tag = message.text.strip().replace('#', '').upper().replace('O', '0')
         
         bot.send_message(message.chat.id, "🔍 Поиск аккаунта и расчет стоимости...")
         
         try:
-            # Открытый прокси-эндпоинт Brawl Stars API, не требующий ключей и IP-привязок
-            url = f"https://brawlify.com/api/v1/player/{tag}"
+            # Запрос через универсальный CORS-прокси без защиты от IP
+            target_url = f"https://api.brawlace.com/v1/players/%23{tag}"
+            proxy_url = f"https://api.allorigins.win/get?url={requests.utils.quote(target_url)}"
             
-            headers = {
-                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
-            }
-            
-            response = requests.get(url, headers=headers, timeout=10)
+            response = requests.get(proxy_url, timeout=12)
             
             if response.status_code == 200:
-                data = response.json()
+                res_json = response.json()
+                data = json.loads(res_json['contents'])
                 
+                # Проверка наличия ошибок в ответе API
+                if 'message' in data or 'error' in data or not data.get('name'):
+                    bot.send_message(message.chat.id, "❌ Аккаунт с таким тегом не найден! Проверьте символы.")
+                    return
+
                 name = data.get('name', 'Неизвестно')
                 trophies = data.get('trophies', 0)
                 
@@ -93,16 +102,14 @@ def handle_text(message):
                 )
                 bot.send_message(message.chat.id, info_text, parse_mode="Markdown")
                 user_states[message.chat.id] = 'waiting_for_photo'
-            elif response.status_code == 404:
-                bot.send_message(message.chat.id, "❌ Аккаунт с таким тегом не найден! Проверьте символы.")
             else:
-                bot.send_message(message.chat.id, f"❌ Не удалось найти аккаунт (Код: {response.status_code}). Проверьте тег.")
+                bot.send_message(message.chat.id, "❌ Ошибка при получении данных. Попробуйте еще раз.")
         except Exception as e:
-            bot.send_message(message.chat.id, f"❌ Ошибка соединения: {e}")
+            bot.send_message(message.chat.id, "❌ Не удалось найти аккаунт. Проверьте правильность написания тега.")
     else:
         bot.send_message(message.chat.id, "Воспользуйтесь кнопками меню ниже ⬇️")
 
-# Обработка фото
+# Обработка отправленных фото
 @bot.message_handler(content_types=['photo'])
 def handle_photo(message):
     chat_id = message.chat.id
