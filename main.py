@@ -12,7 +12,7 @@ from aiogram.types import ReplyKeyboardMarkup, KeyboardButton
 logging.basicConfig(level=logging.INFO)
 
 # ==========================================
-# ПОЛУЧЕНИЕ ПЕРЕМЕННЫХ (из Railway / Environment)
+# ПОЛУЧЕНИЕ ПЕРЕМЕННЫХ
 # ==========================================
 BOT_TOKEN = os.getenv("BOT_TOKEN", "8895895178:AAHYlkLlTbGCCNpyMYLIZF4NHbZ5PZmmvL8")
 ADMIN_CHAT_ID = int(os.getenv("ADMIN_CHAT_ID", "5267181585"))
@@ -32,7 +32,7 @@ main_keyboard = ReplyKeyboardMarkup(
 )
 
 # ==========================================
-# ОБРАБОТКА ИЗОБРАЖЕНИЙ (OCR)
+# УЛУЧШЕННАЯ ОБРАБОТКА ИЗОБРАЖЕНИЙ (OCR)
 # ==========================================
 def extract_trophies(image_path: str) -> int | None:
     try:
@@ -42,28 +42,45 @@ def extract_trophies(image_path: str) -> int | None:
 
         height, width, _ = img.shape
 
-        # Вырезаем строго верхнюю центральную часть экрана (с кубками)
-        crop_ymin, crop_ymax = int(height * 0.10), int(height * 0.26)
-        crop_xmin, crop_xmax = int(width * 0.35), int(width * 0.65)
+        # Расширяем область обрезки, чтобы захватить кубки на любых разрешениях и вертикальных скриншотах
+        crop_ymin, crop_ymax = int(height * 0.0), int(height * 0.45)
+        crop_xmin, crop_xmax = int(width * 0.25), int(width * 0.85)
         
         cropped_img = img[crop_ymin:crop_ymax, crop_xmin:crop_xmax]
+        if cropped_img.size == 0:
+            return None
 
-        gray = cv2.cvtColor(cropped_img, cv2.COLOR_BGR2GRAY)
-        _, thresh = cv2.threshold(gray, 180, 255, cv2.THRESH_BINARY)
+        # Увеличиваем изображение для более точного OCR
+        resized = cv2.resize(cropped_img, None, fx=2, fy=2, interpolation=cv2.INTER_CUBIC)
+        gray = cv2.cvtColor(resized, cv2.COLOR_BGR2GRAY)
 
+        # Вариант 1: Пороговая обработка (Threshold)
+        _, thresh = cv2.threshold(gray, 170, 255, cv2.THRESH_BINARY)
+        
         config = '--psm 6 -c tessedit_char_whitelist=0123456789'
         raw_text = pytesseract.image_to_string(thresh, config=config)
-        digits_only = re.sub(r'\D', '', raw_text)
+        digits = [int(d) for d in re.findall(r'\d+', raw_text) if 50 <= int(d) <= 200000]
 
-        if not digits_only:
-            raw_text = pytesseract.image_to_string(cropped_img, config=config)
-            digits_only = re.sub(r'\D', '', raw_text)
+        if digits:
+            return max(digits)
 
-        if digits_only:
-            trophies = int(digits_only)
-            # Подняли порог, чтобы распознавать аккаунты с >100k кубков
-            if 50 <= trophies <= 200000:
-                return trophies
+        # Вариант 2: Адаптивный порог (для контрастных цифр на сложном фоне)
+        adapt_thresh = cv2.adaptiveThreshold(
+            gray, 255, cv2.ADAPTIVE_THRESH_GAUSSIAN_C, cv2.THRESH_BINARY, 11, 2
+        )
+        raw_text_adapt = pytesseract.image_to_string(adapt_thresh, config=config)
+        digits_adapt = [int(d) for d in re.findall(r'\d+', raw_text_adapt) if 50 <= int(d) <= 200000]
+
+        if digits_adapt:
+            return max(digits_adapt)
+
+        # Вариант 3: Прямой поиск по оттенкам серого
+        raw_text_gray = pytesseract.image_to_string(gray, config=config)
+        digits_gray = [int(d) for d in re.findall(r'\d+', raw_text_gray) if 50 <= int(d) <= 200000]
+
+        if digits_gray:
+            return max(digits_gray)
+
     except Exception as e:
         logging.error(f"Ошибка при OCR: {e}")
 
@@ -91,7 +108,6 @@ async def cmd_start(message: types.Message):
     )
 
 
-# Обработка кнопки «Продать аккаунт (По фото)»
 @dp.message(F.text == "👾 Продать аккаунт (По фото) 👾")
 async def process_sell_button(message: types.Message):
     await message.answer(
@@ -99,13 +115,11 @@ async def process_sell_button(message: types.Message):
     )
 
 
-# Обработка кнопки «связь с админом»
 @dp.message(F.text == "связь с админом")
 async def process_admin_contact(message: types.Message):
     await message.answer("Для связи с администратором пишите: @admin_username")
 
 
-# Обработка кнопки «Правила 📄»
 @dp.message(F.text == "Правила 📄")
 async def process_rules(message: types.Message):
     await message.answer(
@@ -117,7 +131,6 @@ async def process_rules(message: types.Message):
     )
 
 
-# Обработка фотографий
 @dp.message(F.photo)
 async def process_screenshot(message: types.Message):
     status_msg = await message.answer("🔍 Сканирую скриншот...")
@@ -174,7 +187,6 @@ async def process_screenshot(message: types.Message):
 
 
 async def main():
-    # Сбрасываем все зависшие/накопившиеся вебхуки перед запуском
     await bot.delete_webhook(drop_pending_updates=True)
     logging.info("Бот успешно запущен!")
     await dp.start_polling(bot)
