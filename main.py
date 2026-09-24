@@ -14,7 +14,7 @@ import telebot
 from telebot import types
 
 # Получаем токен из переменных окружения
-TOKEN = os.getenv('BOT_TOKEN')
+TOKEN = os.getenv('8895895178:AAHRB6dt-LR_17MX9pMsNJZJDPqGruQHYzk')
 bot = telebot.TeleBot(TOKEN)
 
 @bot.message_handler(commands=['start'])
@@ -23,10 +23,10 @@ def start_command(message):
     keyboard = types.ReplyKeyboardMarkup(resize_keyboard=True)
     
     # Создаем 4 кнопки
-    btn_like = types.KeyboardButton("❤️")
-    btn_dislike = types.KeyboardButton("👎")
-    btn_report = types.KeyboardButton("жалоба")
-    btn_sleep = types.KeyboardButton("zzz")
+    btn_like = types.KeyboardButton("связь с админом ")
+    btn_dislike = types.KeyboardButton("💸продать акаунт💸")
+    btn_report = types.KeyboardButton("правила")
+    
     
     # Размещаем все 4 кнопки в один ряд
     keyboard.row(btn_like, btn_dislike, btn_report, btn_sleep)
