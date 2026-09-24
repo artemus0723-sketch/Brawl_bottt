@@ -57,55 +57,46 @@ def handle_text(message):
             parse_mode="Markdown"
         )
     elif user_states.get(message.chat.id) == 'waiting_for_tag':
-        # Подготовка тега: убираем решетку, делаем CAPS, меняем O на 0
         clean_tag = message.text.strip().replace('#', '').upper().replace('O', '0')
         
         bot.send_message(message.chat.id, "🔍 Поиск аккаунта и расчет стоимости...")
         
-        data = None
-        headers = {'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)'}
-
-        # Обход блокировки Railway через CORS Proxy
-        target_url = f"https://api.brawlify.com/v1/player/{clean_tag}"
-        proxy_url = f"https://corsproxy.io/?{target_url}"
-
+        # Специальный открытый прокси для Supercell API
+        url = f"https://brawlproxy.vercel.app/api/player/{clean_tag}"
+        
         try:
-            res = requests.get(proxy_url, headers=headers, timeout=10)
+            res = requests.get(url, timeout=10)
+            
             if res.status_code == 200:
                 data = res.json()
+                name = data.get('name', 'Неизвестно')
+                trophies = data.get('trophies', 0)
+                
+                price_uah = round(trophies / 25, 2)
+                price_rub = round(price_uah * 2, 2)
+                
+                info_text = (
+                    f"📊 **Данные аккаунта:**\n"
+                    f"👤 Ник: **{name}**\n"
+                    f"🏆 Кубки: **{trophies}**\n\n"
+                    f"💰 **Предварительная оценка:**\n"
+                    f"• **{price_uah} грн**\n"
+                    f"• **{price_rub} руб**\n\n"
+                    f"Если устраивает цена — отправь скриншот профиля для подтверждения сделки!"
+                )
+                bot.send_message(message.chat.id, info_text, parse_mode="Markdown")
+                user_states[message.chat.id] = 'waiting_for_photo'
             else:
-                # Вторая попытка напрямую к brawlapi
-                res2 = requests.get(f"https://api.brawlapi.com/v1/player/%23{clean_tag}", headers=headers, timeout=10)
-                if res2.status_code == 200:
-                    data = res2.json()
+                # ВЫВОДИМ ТОЧНУЮ ОШИБКУ В ЧАТ
+                bot.send_message(
+                    message.chat.id, 
+                    f"❌ Ошибка сервера/API! Код ответа: `{res.status_code}`.\n"
+                    f"Текст: {res.text[:100]}", 
+                    parse_mode="Markdown"
+                )
         except Exception as e:
-            print(f"Ошибка запроса: {e}")
-
-        # Проверка ответа
-        if data and ('name' in data or 'trophies' in data):
-            name = data.get('name', 'Неизвестно')
-            trophies = data.get('trophies', 0)
+            bot.send_message(message.chat.id, f"❌ Ошибка подключения: {e}")
             
-            # Формула: 25 кубков = 1 грн = 2 руб
-            price_uah = round(trophies / 25, 2)
-            price_rub = round(price_uah * 2, 2)
-            
-            info_text = (
-                f"📊 **Данные аккаунта:**\n"
-                f"👤 Ник: **{name}**\n"
-                f"🏆 Кубки: **{trophies}**\n\n"
-                f"💰 **Предварительная оценка:**\n"
-                f"• **{price_uah} грн**\n"
-                f"• **{price_rub} руб**\n\n"
-                f"Если устраивает цена — отправь скриншот профиля для подтверждения сделки!"
-            )
-            bot.send_message(message.chat.id, info_text, parse_mode="Markdown")
-            user_states[message.chat.id] = 'waiting_for_photo'
-        else:
-            bot.send_message(
-                message.chat.id, 
-                "❌ Аккаунт не найден! Перепроверьте тег в профиле игры (скопируйте его прямо из игры)."
-            )
     else:
         bot.send_message(message.chat.id, "Воспользуйтесь кнопками меню ниже ⬇️")
 
