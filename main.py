@@ -6,22 +6,34 @@ import logging
 import asyncio
 from aiogram import Bot, Dispatcher, F, types
 from aiogram.filters import CommandStart
+from aiogram.types import ReplyKeyboardMarkup, KeyboardButton
 
 # Настройка логирования
 logging.basicConfig(level=logging.INFO)
 
 # ==========================================
-# ПОЛУЧЕНИЕ ПЕРЕМЕННЫХ (из Railway Variables)
+# ПОЛУЧЕНИЕ ПЕРЕМЕННЫХ (из Railway / Environment)
 # ==========================================
-# Если переменная BOT_TOKEN есть в Railway, возьмет её.
-# Если нет — подставит значение из кавычек ниже:
 BOT_TOKEN = os.getenv("BOT_TOKEN", "8895895178:AAHYlkLlTbGCCNpyMYLIZF4NHbZ5PZmmvL8")
 ADMIN_CHAT_ID = int(os.getenv("ADMIN_CHAT_ID", "5267181585"))
 
 bot = Bot(token=BOT_TOKEN)
 dp = Dispatcher()
 
+# ==========================================
+# КЛАВИАТУРА
+# ==========================================
+main_keyboard = ReplyKeyboardMarkup(
+    keyboard=[
+        [KeyboardButton(text="связь с админом"), KeyboardButton(text="Правила 📄")],
+        [KeyboardButton(text="👾 Продать аккаунт (По фото) 👾")]
+    ],
+    resize_keyboard=True
+)
 
+# ==========================================
+# ОБРАБОТКА ИЗОБРАЖЕНИЙ (OCR)
+# ==========================================
 def extract_trophies(image_path: str) -> int | None:
     try:
         img = cv2.imread(image_path)
@@ -49,7 +61,8 @@ def extract_trophies(image_path: str) -> int | None:
 
         if digits_only:
             trophies = int(digits_only)
-            if 50 <= trophies <= 85000:
+            # Подняли порог, чтобы распознавать аккаунты с >100k кубков
+            if 50 <= trophies <= 200000:
                 return trophies
     except Exception as e:
         logging.error(f"Ошибка при OCR: {e}")
@@ -66,12 +79,45 @@ def calculate_price(trophies: int) -> dict:
         "price_uah": round(trophies * rate_uah, 2)
     }
 
+# ==========================================
+# ХЭНДЛЕРЫ КОМАНД И КНОПОК
+# ==========================================
 
 @dp.message(CommandStart())
 async def cmd_start(message: types.Message):
-    await message.answer("Привет! Отправь мне скриншот профиля Brawl Stars, и я рассчитаю стоимость аккаунта.")
+    await message.answer(
+        "Привет! Отправь мне скриншот профиля Brawl Stars, и я рассчитаю стоимость аккаунта.",
+        reply_markup=main_keyboard
+    )
 
 
+# Обработка кнопки «Продать аккаунт (По фото)»
+@dp.message(F.text == "👾 Продать аккаунт (По фото) 👾")
+async def process_sell_button(message: types.Message):
+    await message.answer(
+        "📸 Пожалуйста, отправьте скриншот вашего профиля Brawl Stars в чат."
+    )
+
+
+# Обработка кнопки «связь с админом»
+@dp.message(F.text == "связь с админом")
+async def process_admin_contact(message: types.Message):
+    await message.answer("Для связи с администратором пишите: @admin_username")
+
+
+# Обработка кнопки «Правила 📄»
+@dp.message(F.text == "Правила 📄")
+async def process_rules(message: types.Message):
+    await message.answer(
+        "📋 **Правила скупки:**\n\n"
+        "1. Принимаются только оригинальные скриншоты профиля.\n"
+        "2. Оценка является предварительной и зависит от множества факторов.\n"
+        "3. Окончательную сумму утверждает администратор.",
+        parse_mode="Markdown"
+    )
+
+
+# Обработка фотографий
 @dp.message(F.photo)
 async def process_screenshot(message: types.Message):
     status_msg = await message.answer("🔍 Сканирую скриншот...")
