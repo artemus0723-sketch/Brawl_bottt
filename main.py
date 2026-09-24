@@ -32,7 +32,7 @@ main_keyboard = ReplyKeyboardMarkup(
 )
 
 # ==========================================
-# УЛУЧШЕННАЯ ОБРАБОТКА ИЗОБРАЖЕНИЙ (OCR)
+# ТОЧНЫЙ АЛГОРИТМ OCR ДЛЯ BRAWL STARS
 # ==========================================
 def extract_trophies(image_path: str) -> int | None:
     try:
@@ -40,46 +40,60 @@ def extract_trophies(image_path: str) -> int | None:
         if img is None:
             return None
 
-        height, width, _ = img.shape
+        h, w, _ = img.shape
 
-        # Расширяем область обрезки, чтобы захватить кубки на любых разрешениях и вертикальных скриншотах
-        crop_ymin, crop_ymax = int(height * 0.0), int(height * 0.45)
-        crop_xmin, crop_xmax = int(width * 0.25), int(width * 0.85)
-        
-        cropped_img = img[crop_ymin:crop_ymax, crop_xmin:crop_xmax]
-        if cropped_img.size == 0:
+        # Если картинка вертикальная (скриншот экрана телефона с черными рамками)
+        # Убираем верхние и нижние черные поля
+        if h > w:
+            gray_img = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
+            _, mask = cv2.threshold(gray_img, 15, 255, cv2.THRESH_BINARY)
+            contours, _ = cv2.findContours(mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+            if contours:
+                c = max(contours, key=cv2.contourArea)
+                x, y, crop_w, crop_h = cv2.boundingRect(c)
+                if crop_w > 100 and crop_h > 100:
+                    img = img[y:y+crop_h, x:x+crop_w]
+                    h, w, _ = img.shape
+
+        # Точная зона блока «ПУТЬ К СЛАВЕ» (верхний центр-право)
+        crop_ymin, crop_ymax = int(h * 0.08), int(h * 0.35)
+        crop_xmin, crop_xmax = int(w * 0.48), int(w * 0.78)
+
+        cropped = img[crop_ymin:crop_ymax, crop_xmin:crop_xmax]
+        if cropped.size == 0:
             return None
 
-        # Увеличиваем изображение для более точного OCR
-        resized = cv2.resize(cropped_img, None, fx=2, fy=2, interpolation=cv2.INTER_CUBIC)
+        # Увеличиваем масштаб для идеального распознавания шрифта игры
+        resized = cv2.resize(cropped, None, fx=2.5, fy=2.5, interpolation=cv2.INTER_CUBIC)
         gray = cv2.cvtColor(resized, cv2.COLOR_BGR2GRAY)
 
-        # Вариант 1: Пороговая обработка (Threshold)
-        _, thresh = cv2.threshold(gray, 170, 255, cv2.THRESH_BINARY)
-        
+        # Контрастная фильтрация (белые цифры на темном фоне)
+        _, thresh = cv2.threshold(gray, 180, 255, cv2.THRESH_BINARY)
+
         config = '--psm 6 -c tessedit_char_whitelist=0123456789'
+        
+        # 1. Попытка чтения с бинаризованного кадра
         raw_text = pytesseract.image_to_string(thresh, config=config)
-        digits = [int(d) for d in re.findall(r'\d+', raw_text) if 50 <= int(d) <= 200000]
+        found_numbers = re.findall(r'\d+', raw_text)
 
-        if digits:
-            return max(digits)
+        # Отбираем только реальные значения кубков (от 500 до 200,000)
+        valid = [int(n) for n in found_numbers if 500 <= int(n) <= 200000]
+        if valid:
+            return valid[0]
 
-        # Вариант 2: Адаптивный порог (для контрастных цифр на сложном фоне)
-        adapt_thresh = cv2.adaptiveThreshold(
-            gray, 255, cv2.ADAPTIVE_THRESH_GAUSSIAN_C, cv2.THRESH_BINARY, 11, 2
-        )
-        raw_text_adapt = pytesseract.image_to_string(adapt_thresh, config=config)
-        digits_adapt = [int(d) for d in re.findall(r'\d+', raw_text_adapt) if 50 <= int(d) <= 200000]
+        # 2. Попытка чтения с оттенков серого (если порог срезaл грани)
+        raw_gray_text = pytesseract.image_to_string(gray, config=config)
+        found_gray_numbers = re.findall(r'\d+', raw_gray_text)
+        valid_gray = [int(n) for n in found_gray_numbers if 500 <= int(n) <= 200000]
+        if valid_gray:
+            return valid_gray[0]
 
-        if digits_adapt:
-            return max(digits_adapt)
-
-        # Вариант 3: Прямой поиск по оттенкам серого
-        raw_text_gray = pytesseract.image_to_string(gray, config=config)
-        digits_gray = [int(d) for d in re.findall(r'\d+', raw_text_gray) if 50 <= int(d) <= 200000]
-
-        if digits_gray:
-            return max(digits_gray)
+        # 3. Резервный вариант: поиск по всему изображению
+        raw_full_text = pytesseract.image_to_string(img, config=config)
+        full_numbers = re.findall(r'\d+', raw_full_text)
+        valid_full = [int(n) for n in full_numbers if 500 <= int(n) <= 200000]
+        if valid_full:
+            return valid_full[0]
 
     except Exception as e:
         logging.error(f"Ошибка при OCR: {e}")
