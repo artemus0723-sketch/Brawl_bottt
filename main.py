@@ -2,10 +2,7 @@ import telebot
 from telebot import types
 import requests
 
-# ⚠️ Замените на ваш актуальный токен от BotFather
 TOKEN = '8895895178:AAE59bdqWy9oPjpS-hWWzvt3ERUKOvS3Nyw'
-
-# Ваш Telegram ID
 ADMIN_CHAT_ID = 5267181585
 
 bot = telebot.TeleBot(TOKEN)
@@ -21,10 +18,10 @@ def start_command(message):
     markup.add(btn_admin, btn_rules)
     markup.add(btn_sell)
     
+    # Расценка убрана из приветствия
     bot.send_message(
         message.chat.id, 
-        "Привет! Мы быстро оцениваем и покупаем аккаунты Brawl Stars 💸\n"
-        "Курс оценки: **25 кубков = 1 грн = 2 рубля**.\n\n"
+        "Привет! Мы быстро оцениваем и покупаем аккаунты Brawl Stars 💸\n\n"
         "Нажми кнопку ниже, чтобы узнать стоимость твоего аккаунта по тегу!", 
         reply_markup=markup,
         parse_mode="Markdown"
@@ -32,7 +29,7 @@ def start_command(message):
 
 @bot.message_handler(content_types=['text'])
 def handle_text(message):
-    # 1. Ответ админа пользователю через функцию "Ответить" (Reply)
+    # Ответ админа
     if message.chat.id == ADMIN_CHAT_ID and message.reply_to_message:
         try:
             first_line = message.reply_to_message.caption or message.reply_to_message.text or ""
@@ -40,14 +37,13 @@ def handle_text(message):
                 raw_id = first_line.split("ID:")[1].split("\n")[0].strip()
                 user_id = int(raw_id)
                 bot.send_message(user_id, f"💬 **Ответ от администратора:**\n\n{message.text}", parse_mode="Markdown")
-                bot.send_message(ADMIN_CHAT_ID, "✅ Ответ успешно отправлен пользователю!")
+                bot.send_message(ADMIN_CHAT_ID, "✅ Ответ успешно отправлен!")
             else:
-                bot.send_message(ADMIN_CHAT_ID, "❌ Не удалось найти ID пользователя в сообщении.")
+                bot.send_message(ADMIN_CHAT_ID, "❌ Не удалось найти ID пользователя.")
         except Exception as e:
             bot.send_message(ADMIN_CHAT_ID, f"❌ Ошибка отправки: {e}")
         return
 
-    # 2. Обработка кнопок меню
     if message.text == "связь с админом":
         bot.send_message(message.chat.id, "Администратор: @yrodochk")
     elif message.text == "Правила📑":
@@ -60,15 +56,18 @@ def handle_text(message):
             "*(Его можно скопировать в профиле игры под аватаркой)*",
             parse_mode="Markdown"
         )
-    # 3. Обработка ввода тега игрока
     elif user_states.get(message.chat.id) == 'waiting_for_tag':
-        tag = message.text.strip().replace('#', '').upper()
+        # Автоматическая замена похожих символов (буква O на ноль 0)
+        tag = message.text.strip().replace('#', '').upper().replace('O', '0')
         
-        bot.send_message(message.chat.id, "🔍 Поиск аккаунта на Brawlace и расчет стоимости...")
+        bot.send_message(message.chat.id, "🔍 Поиск аккаунта и расчет стоимости...")
         
         try:
             url = f"https://api.brawlace.com/v1/players/%23{tag}"
-            response = requests.get(url, timeout=10)
+            headers = {
+                "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)"
+            }
+            response = requests.get(url, headers=headers, timeout=10)
             
             if response.status_code == 200:
                 data = response.json()
@@ -76,7 +75,7 @@ def handle_text(message):
                 name = data.get('name', 'Неизвестно')
                 trophies = data.get('trophies', 0)
                 
-                # --- ФОРМУЛА: 25 кубков = 1 грн = 2 рубля ---
+                # Расчет (25 кубков = 1 грн = 2 рубля)
                 price_uah = round(trophies / 25, 2)
                 price_rub = round(price_uah * 2, 2)
                 
@@ -90,8 +89,6 @@ def handle_text(message):
                     f"Если устраивает цена — отправь скриншот профиля для подтверждения сделки!"
                 )
                 bot.send_message(message.chat.id, info_text, parse_mode="Markdown")
-                
-                # Переключаем состояние на ожидание фото
                 user_states[message.chat.id] = 'waiting_for_photo'
                 
             else:
@@ -101,7 +98,7 @@ def handle_text(message):
     else:
         bot.send_message(message.chat.id, "Воспользуйтесь кнопками меню ниже ⬇️")
 
-# 4. Обработка отправки скриншотов
+# Обработка фото
 @bot.message_handler(content_types=['photo'])
 def handle_photo(message):
     chat_id = message.chat.id
@@ -122,7 +119,6 @@ def handle_photo(message):
     else:
         bot.send_message(chat_id, "Сначала нажмите кнопку «👾Продать аккаунт (Авто-оценка)👾» и введите тег.")
 
-# Запуск постоянной работы
 if __name__ == '__main__':
     print("Бот успешно запущен!")
     bot.infinity_polling(skip_pending=True)
