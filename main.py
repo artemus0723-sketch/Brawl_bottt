@@ -11,7 +11,7 @@ ADMIN_CHAT_ID = 5267181585
 
 bot = telebot.TeleBot(TOKEN)
 
-# Словарь для отслеживания пользователей, ожидающих отправку фото
+# Словарь для отслеживания состояния пользователей
 user_states = {}
 
 @bot.message_handler(commands=['start'])
@@ -32,6 +32,22 @@ def start_command(message):
 
 @bot.message_handler(content_types=['text'])
 def handle_text(message):
+    # Если сообщение пишет админ и это ответ (Reply) на сообщение бота
+    if message.chat.id == ADMIN_CHAT_ID and message.reply_to_message:
+        try:
+            # Извлекаем ID пользователя из текста оригинального сообщения
+            first_line = message.reply_to_message.caption or message.reply_to_message.text or ""
+            if "ID:" in first_line:
+                user_id = int(first_line.split("ID:")[1].strip())
+                bot.send_message(user_id, f"💬 **Ответ от администратора:**\n\n{message.text}")
+                bot.send_message(ADMIN_CHAT_ID, "✅ Сообщение успешно отправлено пользователю!")
+            else:
+                bot.send_message(ADMIN_CHAT_ID, "❌ Не удалось найти ID пользователя в этом сообщении.")
+        except Exception as e:
+            bot.send_message(ADMIN_CHAT_ID, f"❌ Ошибка при отправке: {e}")
+        return
+
+    # Обработка стандартных кнопок для обычных пользователей
     if message.text == "связь с админом":
         bot.send_message(message.chat.id, "@yrodochk администратор постарается вам ответь как можно скорее")
     elif message.text == "Правила📑":
@@ -47,20 +63,17 @@ def handle_photo(message):
     
     # Проверяем, нажал ли пользователь кнопку "продать аккаунт"
     if user_states.get(chat_id) == 'waiting_for_photo':
-        # Отправляем фото админу с информацией о пользователе
         photo_id = message.photo[-1].file_id
-        username = f"@{message.from_user.username}" if message.from_user.username else f"ID: {chat_id}"
+        username = f"@{message.from_user.username}" if message.from_user.username else "нет юзернейма"
         
+        # Отправляем фото админу с зашитым ID пользователя
         bot.send_photo(
             ADMIN_CHAT_ID, 
             photo_id, 
-            caption=f"📩 **Новая заявка на продажу!**\nОт: {username}"
+            caption=f"📩 **Новая заявка на продажу!**\nОт: {username}\nID: {chat_id}\n\n*(Зажмите сообщение и нажмите «Ответить», чтобы написать пользователю)*"
         )
         
-        # Отвечаем пользователю
         bot.send_message(chat_id, "ожидание⏳")
-        
-        # Сбрасываем состояние
         user_states[chat_id] = None
 
 if __name__ == '__main__':
