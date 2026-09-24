@@ -16,7 +16,8 @@ logging.basicConfig(level=logging.INFO)
 BOT_TOKEN = "8895895178:AAHYlkLlTbGCCNpyMYLIZF4NHbZ5PZmmvL8"  # Токен от @BotFather
 ADMIN_CHAT_ID = 5267181585     # ID администратора или ID чата админов
 
-# Если Tesseract установлен в системную папку на Windows, раскомментируйте строку ниже:
+# В Linux / Railway путь указывается автоматически системно, 
+# поэтому Windows-путь закомментирован:
 # pytesseract.pytesseract.tesseract_cmd = r'C:\Program Files\Tesseract-OCR\tesseract.exe'
 
 bot = Bot(token=BOT_TOKEN)
@@ -88,7 +89,7 @@ async def cmd_start(message: types.Message):
 
 @dp.message(F.photo)
 async def process_screenshot(message: types.Message):
-    # ПРИНТ ДЛЯ ПРОВЕРКИ ОБНОВЛЕНИЯ КОДА:
+    # ПРИНТ ДЛЯ ПРОВЕРКИ ОБНОВЛЕНИЯ КОДА
     print("\n[INFO] --- ЗАПУЩЕНА НОВАЯ ВЕРСИЯ КОДА (С ОБРЕЗКОЙ КАДРА) ---\n")
 
     status_msg = await message.answer("🔍 Сканирую скриншот...")
