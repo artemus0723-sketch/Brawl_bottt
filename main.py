@@ -61,42 +61,56 @@ def handle_text(message):
         
         bot.send_message(message.chat.id, "🔍 Поиск аккаунта и расчет стоимости...")
         
-        # Специальный открытый прокси для Supercell API
-        url = f"https://brawlproxy.vercel.app/api/player/{clean_tag}"
+        data = None
         
+        # 1. Запрос через надёжный прокси AllOrigins
         try:
-            res = requests.get(url, timeout=10)
+            target_url = f"https://api.brawlapi.com/v1/player/%23{clean_tag}"
+            proxy_url = f"https://api.allorigins.win/get?url={target_url}"
+            res = requests.get(proxy_url, timeout=10)
             
             if res.status_code == 200:
-                data = res.json()
-                name = data.get('name', 'Неизвестно')
-                trophies = data.get('trophies', 0)
-                
-                price_uah = round(trophies / 25, 2)
-                price_rub = round(price_uah * 2, 2)
-                
-                info_text = (
-                    f"📊 **Данные аккаунта:**\n"
-                    f"👤 Ник: **{name}**\n"
-                    f"🏆 Кубки: **{trophies}**\n\n"
-                    f"💰 **Предварительная оценка:**\n"
-                    f"• **{price_uah} грн**\n"
-                    f"• **{price_rub} руб**\n\n"
-                    f"Если устраивает цена — отправь скриншот профиля для подтверждения сделки!"
-                )
-                bot.send_message(message.chat.id, info_text, parse_mode="Markdown")
-                user_states[message.chat.id] = 'waiting_for_photo'
-            else:
-                # ВЫВОДИМ ТОЧНУЮ ОШИБКУ В ЧАТ
-                bot.send_message(
-                    message.chat.id, 
-                    f"❌ Ошибка сервера/API! Код ответа: `{res.status_code}`.\n"
-                    f"Текст: {res.text[:100]}", 
-                    parse_mode="Markdown"
-                )
-        except Exception as e:
-            bot.send_message(message.chat.id, f"❌ Ошибка подключения: {e}")
+                import json
+                contents = res.json().get('contents')
+                if contents:
+                    data = json.loads(contents)
+        except Exception:
+            pass
+
+        # 2. Резервный прямой запрос к Brawlify (если прокси не ответил)
+        if not data or 'name' not in data:
+            try:
+                res_brawl = requests.get(f"https://api.brawlify.com/v1/player/{clean_tag}", timeout=10)
+                if res_brawl.status_code == 200:
+                    data = res_brawl.json()
+            except Exception:
+                pass
+
+        # Обработка результата
+        if data and ('name' in data or 'trophies' in data):
+            name = data.get('name', 'Неизвестно')
+            trophies = data.get('trophies', 0)
             
+            # Формула: 25 кубков = 1 грн = 2 руб
+            price_uah = round(trophies / 25, 2)
+            price_rub = round(price_uah * 2, 2)
+            
+            info_text = (
+                f"📊 **Данные аккаунта:**\n"
+                f"👤 Ник: **{name}**\n"
+                f"🏆 Кубки: **{trophies}**\n\n"
+                f"💰 **Предварительная оценка:**\n"
+                f"• **{price_uah} грн**\n"
+                f"• **{price_rub} руб**\n\n"
+                f"Если устраивает цена — отправь скриншот профиля для подтверждения сделки!"
+            )
+            bot.send_message(message.chat.id, info_text, parse_mode="Markdown")
+            user_states[message.chat.id] = 'waiting_for_photo'
+        else:
+            bot.send_message(
+                message.chat.id, 
+                "❌ Аккаунт не найден! Перепроверьте тег в профиле игры (скопируйте его прямо из игры)."
+            )
     else:
         bot.send_message(message.chat.id, "Воспользуйтесь кнопками меню ниже ⬇️")
 
