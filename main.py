@@ -2,7 +2,7 @@ import telebot
 from telebot import types
 import requests
 
-# ⚠️ ВСТАВЬ СЮДА НОВЫЙ ТОКЕН ИЗ @BotFather
+# ⚠️ ВСТАВЬ СВОЙ ТОКЕН ИЗ @BotFather
 TOKEN = '8895895178:AAHYlkLlTbGCCNpyMYLIZF4NHbZ5PZmmvL8'
 ADMIN_CHAT_ID = 5267181585
 
@@ -57,7 +57,7 @@ def handle_text(message):
             parse_mode="Markdown"
         )
     elif user_states.get(message.chat.id) == 'waiting_for_tag':
-        # Очистка тега: убираем решетку, пробелы, переводим в верхний регистр и меняем O на 0
+        # Подготовка тега: убираем решетку, делаем CAPS, меняем O на 0
         clean_tag = message.text.strip().replace('#', '').upper().replace('O', '0')
         
         bot.send_message(message.chat.id, "🔍 Поиск аккаунта и расчет стоимости...")
@@ -65,26 +65,23 @@ def handle_text(message):
         data = None
         headers = {'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)'}
 
-        # 1. Первая попытка: Brawlify API (без решетки)
-        try:
-            url1 = f"https://api.brawlify.com/v1/player/{clean_tag}"
-            res1 = requests.get(url1, headers=headers, timeout=5)
-            if res1.status_code == 200:
-                data = res1.json()
-        except Exception:
-            pass
+        # Обход блокировки Railway через CORS Proxy
+        target_url = f"https://api.brawlify.com/v1/player/{clean_tag}"
+        proxy_url = f"https://corsproxy.io/?{target_url}"
 
-        # 2. Вторая попытка: BrawlAPI (с %23)
-        if not data:
-            try:
-                url2 = f"https://api.brawlapi.com/v1/player/%23{clean_tag}"
-                res2 = requests.get(url2, headers=headers, timeout=5)
+        try:
+            res = requests.get(proxy_url, headers=headers, timeout=10)
+            if res.status_code == 200:
+                data = res.json()
+            else:
+                # Вторая попытка напрямую к brawlapi
+                res2 = requests.get(f"https://api.brawlapi.com/v1/player/%23{clean_tag}", headers=headers, timeout=10)
                 if res2.status_code == 200:
                     data = res2.json()
-            except Exception:
-                pass
+        except Exception as e:
+            print(f"Ошибка запроса: {e}")
 
-        # Обработка успешного ответа
+        # Проверка ответа
         if data and ('name' in data or 'trophies' in data):
             name = data.get('name', 'Неизвестно')
             trophies = data.get('trophies', 0)
