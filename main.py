@@ -57,33 +57,24 @@ def handle_text(message):
             parse_mode="Markdown"
         )
     elif user_states.get(message.chat.id) == 'waiting_for_tag':
-        # Очистка тега: убираем решетку, делаем CAPS, меняем O на 0
         clean_tag = message.text.strip().replace('#', '').upper().replace('O', '0')
         
         bot.send_message(message.chat.id, "🔍 Поиск аккаунта и расчет стоимости...")
         
         data = None
-        headers = {'User-Agent': 'Mozilla/5.0'}
-
-        # Запрос к рабочему открытому эндпоинту
+        
+        # Запрос к рабочему сообщественному прокси BrawlStarsUP (без блокировок)
         try:
-            url = f"https://api.brawlapi.com/v1/player/%23{clean_tag}"
-            res = requests.get(url, headers=headers, timeout=8)
+            url = f"https://proxy.brawlstarsup.com/v1/players/%23{clean_tag}"
+            headers = {'User-Agent': 'Mozilla/5.0'}
+            res = requests.get(url, headers=headers, timeout=10)
+            
             if res.status_code == 200:
                 data = res.json()
         except Exception:
             pass
 
-        # Резервный запрос
-        if not data:
-            try:
-                url_alt = f"https://brawlapi.com/v1/player/{clean_tag}"
-                res_alt = requests.get(url_alt, headers=headers, timeout=8)
-                if res_alt.status_code == 200:
-                    data = res_alt.json()
-            except Exception:
-                pass
-
+        # Если данные получены
         if data and ('name' in data or 'trophies' in data):
             name = data.get('name', 'Неизвестно')
             trophies = data.get('trophies', 0)
