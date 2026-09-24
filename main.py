@@ -2,7 +2,9 @@ import telebot
 from telebot import types
 import requests
 
+# ⚠️ Укажите ваши токены и ID
 TOKEN = '8895895178:AAE59bdqWy9oPjpS-hWWzvt3ERUKOvS3Nyw'
+SUPERCELL_API_TOKEN = 'eyJ0eXAiOiJKV1QiLCJhbGciOiJIUzUxMiIsImtpZCI6IjI4YTMxOGY3LTAwMDAtYTFlYi03ZmExLTJjNzQzM2M2Y2NhNSJ9.eyJpc3MiOiJzdXBlcmNlbGwiLCJhdWQiOiJzdXBlcmNlbGw6Z2FtZWFwaSIsImp0aSI6IjMwZDQ4OTkwLThmMjEtNDRlMy04YjNkLTdjODEwMjgzMjg2YyIsImlhdCI6MTc5MDI0NzYwMiwic3ViIjoiZGV2ZWxvcGVyL2E3ZDhiZjE2LWVjNjktNGM2Zi1iMzg3LTE5N2QzNjQ5ZWFlMiIsInNjb3BlcyI6WyJicmF3bHN0YXJzIl0sImxpbWl0cyI6W3sidGllciI6ImRldmVsb3Blci9zaWx2ZXIiLCJ0eXBlIjoidGhyb3R0bGluZyJ9LHsiY2lkcnMiOlsiOTQuMTc4LjE2My4yNSJdLCJ0eXBlIjoiY2xpZW50In1dfQ.m3lx918wvXTLPPiBljw3au1wR7-mS03E_Ck9U4_ooHjU1pcKJnPUr6-bFJd64wWEvs4h_e6v-Q-NF_40IIXi2w'
 ADMIN_CHAT_ID = 5267181585
 
 bot = telebot.TeleBot(TOKEN)
@@ -28,6 +30,7 @@ def start_command(message):
 
 @bot.message_handler(content_types=['text'])
 def handle_text(message):
+    # Ответ админа пользователю через "Ответить"
     if message.chat.id == ADMIN_CHAT_ID and message.reply_to_message:
         try:
             first_line = message.reply_to_message.caption or message.reply_to_message.text or ""
@@ -55,16 +58,14 @@ def handle_text(message):
             parse_mode="Markdown"
         )
     elif user_states.get(message.chat.id) == 'waiting_for_tag':
-        # Очищаем тег от лишниx символов и заменой O на 0
         tag = message.text.strip().replace('#', '').upper().replace('O', '0')
         
         bot.send_message(message.chat.id, "🔍 Поиск аккаунта и расчет стоимости...")
         
         try:
-            # Используем надежный серверный маршрут Brawlify
-            url = f"https://api.brawlify.com/v1/players/%23{tag}"
+            url = f"https://api.brawlstars.com/v1/players/%23{tag}"
             headers = {
-                "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"
+                "Authorization": f"Bearer {SUPERCELL_API_TOKEN}"
             }
             response = requests.get(url, headers=headers, timeout=10)
             
@@ -90,15 +91,17 @@ def handle_text(message):
                 bot.send_message(message.chat.id, info_text, parse_mode="Markdown")
                 user_states[message.chat.id] = 'waiting_for_photo'
             elif response.status_code == 404:
-                bot.send_message(message.chat.id, "❌ Игрок с таким тегом не найден! Проверьте букву/цифры в теге.")
+                bot.send_message(message.chat.id, "❌ Аккаунт с таким тегом не найден! Проверьте символы.")
+            elif response.status_code == 403:
+                bot.send_message(message.chat.id, "❌ Ошибка авторизации (проверьте IP-адрес в ключе Supercell).")
             else:
-                bot.send_message(message.chat.id, f"❌ Не удалось найти аккаунт (Код ошибки сервера: {response.status_code}). Проверьте тег.")
+                bot.send_message(message.chat.id, f"❌ Ошибка получения данных (Код: {response.status_code}).")
         except Exception as e:
-            bot.send_message(message.chat.id, "❌ Ошибка соединения с сервером. Попробуйте чуть позже.")
+            bot.send_message(message.chat.id, "❌ Ошибка соединения с сервером. Попробуйте позже.")
     else:
         bot.send_message(message.chat.id, "Воспользуйтесь кнопками меню ниже ⬇️")
 
-# Обработка фотографий
+# Обработка фото
 @bot.message_handler(content_types=['photo'])
 def handle_photo(message):
     chat_id = message.chat.id
