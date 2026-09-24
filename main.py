@@ -1,9 +1,8 @@
 import telebot
 from telebot import types
 import requests
-import urllib.parse
 
-# ЗАМЕНИ ТОКЕН (Сгенерируй новый в @BotFather!)
+# ⚠️ ВСТАВЬ СЮДА НОВЫЙ ТОКЕН ИЗ @BotFather
 TOKEN = '8895895178:AAHYlkLlTbGCCNpyMYLIZF4NHbZ5PZmmvL8'
 ADMIN_CHAT_ID = 5267181585
 
@@ -58,51 +57,58 @@ def handle_text(message):
             parse_mode="Markdown"
         )
     elif user_states.get(message.chat.id) == 'waiting_for_tag':
-        # ИСПРАВЛЕНО: убрали replace('U', 'V'), меняем только 'O' на '0'
+        # Очистка тега: убираем решетку, пробелы, переводим в верхний регистр и меняем O на 0
         clean_tag = message.text.strip().replace('#', '').upper().replace('O', '0')
         
         bot.send_message(message.chat.id, "🔍 Поиск аккаунта и расчет стоимости...")
         
+        data = None
+        headers = {'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)'}
+
+        # 1. Первая попытка: Brawlify API (без решетки)
         try:
-            # ИСПРАВЛЕНО: Правильный URL API (player вместо players)
-            # %23 — это зародированный символ # для URL
-            encoded_tag = urllib.parse.quote(f"#{clean_tag}")
-            url = f"https://api.brawlapi.com/v1/player/{encoded_tag}"
+            url1 = f"https://api.brawlify.com/v1/player/{clean_tag}"
+            res1 = requests.get(url1, headers=headers, timeout=5)
+            if res1.status_code == 200:
+                data = res1.json()
+        except Exception:
+            pass
+
+        # 2. Вторая попытка: BrawlAPI (с %23)
+        if not data:
+            try:
+                url2 = f"https://api.brawlapi.com/v1/player/%23{clean_tag}"
+                res2 = requests.get(url2, headers=headers, timeout=5)
+                if res2.status_code == 200:
+                    data = res2.json()
+            except Exception:
+                pass
+
+        # Обработка успешного ответа
+        if data and ('name' in data or 'trophies' in data):
+            name = data.get('name', 'Неизвестно')
+            trophies = data.get('trophies', 0)
             
-            headers = {
-                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
-            }
+            # Формула: 25 кубков = 1 грн = 2 руб
+            price_uah = round(trophies / 25, 2)
+            price_rub = round(price_uah * 2, 2)
             
-            response = requests.get(url, headers=headers, timeout=10)
-            
-            if response.status_code == 200:
-                data = response.json()
-                
-                name = data.get('name', 'Неизвестно')
-                trophies = data.get('trophies', 0)
-                
-                # Формула: 25 кубков = 1 грн = 2 руб
-                price_uah = round(trophies / 25, 2)
-                price_rub = round(price_uah * 2, 2)
-                
-                info_text = (
-                    f"📊 **Данные аккаунта:**\n"
-                    f"👤 Ник: **{name}**\n"
-                    f"🏆 Кубки: **{trophies}**\n\n"
-                    f"💰 **Предварительная оценка:**\n"
-                    f"• **{price_uah} грн**\n"
-                    f"• **{price_rub} руб**\n\n"
-                    f"Если устраивает цена — отправь скриншот профиля для подтверждения сделки!"
-                )
-                bot.send_message(message.chat.id, info_text, parse_mode="Markdown")
-                user_states[message.chat.id] = 'waiting_for_photo'
-            else:
-                bot.send_message(
-                    message.chat.id, 
-                    "❌ Аккаунт не найден! Перепроверьте тег в профиле игры (скопируйте его прямо из игры)."
-                )
-        except Exception as e:
-            bot.send_message(message.chat.id, f"❌ Ошибка сети: {e}")
+            info_text = (
+                f"📊 **Данные аккаунта:**\n"
+                f"👤 Ник: **{name}**\n"
+                f"🏆 Кубки: **{trophies}**\n\n"
+                f"💰 **Предварительная оценка:**\n"
+                f"• **{price_uah} грн**\n"
+                f"• **{price_rub} руб**\n\n"
+                f"Если устраивает цена — отправь скриншот профиля для подтверждения сделки!"
+            )
+            bot.send_message(message.chat.id, info_text, parse_mode="Markdown")
+            user_states[message.chat.id] = 'waiting_for_photo'
+        else:
+            bot.send_message(
+                message.chat.id, 
+                "❌ Аккаунт не найден! Перепроверьте тег в профиле игры (скопируйте его прямо из игры)."
+            )
     else:
         bot.send_message(message.chat.id, "Воспользуйтесь кнопками меню ниже ⬇️")
 
