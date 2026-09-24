@@ -2,8 +2,9 @@ import telebot
 from telebot import types
 import requests
 
-# ⚠️ ВСТАВЬ СВОЙ ТОКЕН ИЗ @BotFather
+# ⚠️ Не забудь вставить актуальный ТОКЕН БОТА, если менял его в @BotFather
 TOKEN = '8895895178:AAHYlkLlTbGCCNpyMYLIZF4NHbZ5PZmmvL8'
+SCRAPER_API_KEY = '677695654a92c1e942f85917ab64dc98'
 ADMIN_CHAT_ID = 5267181585
 
 bot = telebot.TeleBot(TOKEN)
@@ -57,21 +58,22 @@ def handle_text(message):
             parse_mode="Markdown"
         )
     elif user_states.get(message.chat.id) == 'waiting_for_tag':
-        clean_tag = message.text.strip().replace('#', '').upper().replace('O', '0')
+        clean_tag = message.text.strip().replace('#', '').replace(' ', '').upper()
         
-        bot.send_message(message.chat.id, "🔍 Поиск аккаунта и расчет стоимости...")
+        bot.send_message(message.chat.id, f"🔍 Поиск аккаунта `{clean_tag}`...", parse_mode="Markdown")
         
-        # Надежный обоход блокировки Cloudflare
-        url = f"https://corsproxy.io/?https://api.brawlify.com/v1/player/{clean_tag}"
+        target_url = f"https://api.brawlapi.com/v1/player/%23{clean_tag}"
+        proxy_url = f"http://api.scraperapi.com?api_key={SCRAPER_API_KEY}&url={target_url}"
         
         try:
-            res = requests.get(url, timeout=10)
+            res = requests.get(proxy_url, timeout=20)
             
             if res.status_code == 200:
                 data = res.json()
                 name = data.get('name', 'Неизвестно')
                 trophies = data.get('trophies', 0)
                 
+                # Формула расчета
                 price_uah = round(trophies / 25, 2)
                 price_rub = round(price_uah * 2, 2)
                 
@@ -92,7 +94,7 @@ def handle_text(message):
                     "❌ Игрок не найден! Перепроверьте тег в профиле игры."
                 )
         except Exception as e:
-            bot.send_message(message.chat.id, f"❌ Ошибка сети: {e}")
+            bot.send_message(message.chat.id, f"❌ Ошибка подключения к серверу: {e}")
             
     else:
         bot.send_message(message.chat.id, "Воспользуйтесь кнопками меню ниже ⬇️")
