@@ -1,18 +1,13 @@
 import telebot
 from telebot import types
-import cloudscraper
+import requests
 
-# Ваш токен от BotFather
+# ⚠️ Укажите ваши данные
 TOKEN = '8895895178:AAE59bdqWy9oPjpS-hWWzvt3ERUKOvS3Nyw'
-
-# Ваш Telegram ID
 ADMIN_CHAT_ID = 5267181585
 
 bot = telebot.TeleBot(TOKEN)
 user_states = {}
-
-# Создаем скрейпер для авто-обхода защит Cloudflare на Railway
-scraper = cloudscraper.create_scraper()
 
 @bot.message_handler(commands=['start'])
 def start_command(message):
@@ -34,7 +29,7 @@ def start_command(message):
 
 @bot.message_handler(content_types=['text'])
 def handle_text(message):
-    # Ответ админа
+    # Ответ админа пользователю через "Ответить"
     if message.chat.id == ADMIN_CHAT_ID and message.reply_to_message:
         try:
             first_line = message.reply_to_message.caption or message.reply_to_message.text or ""
@@ -62,13 +57,20 @@ def handle_text(message):
             parse_mode="Markdown"
         )
     elif user_states.get(message.chat.id) == 'waiting_for_tag':
+        # Подготовка тега (замена O на 0, убираем #)
         tag = message.text.strip().replace('#', '').upper().replace('O', '0')
         
         bot.send_message(message.chat.id, "🔍 Поиск аккаунта и расчет стоимости...")
         
         try:
-            url = f"https://api.brawlify.com/v1/players/%23{tag}"
-            response = scraper.get(url, timeout=10)
+            # Открытый прокси-эндпоинт Brawl Stars API, не требующий ключей и IP-привязок
+            url = f"https://brawlify.com/api/v1/player/{tag}"
+            
+            headers = {
+                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
+            }
+            
+            response = requests.get(url, headers=headers, timeout=10)
             
             if response.status_code == 200:
                 data = response.json()
@@ -76,7 +78,7 @@ def handle_text(message):
                 name = data.get('name', 'Неизвестно')
                 trophies = data.get('trophies', 0)
                 
-                # Формула: 25 кубков = 1 грн = 2 руб
+                # Расчет: 25 кубков = 1 грн = 2 руб
                 price_uah = round(trophies / 25, 2)
                 price_rub = round(price_uah * 2, 2)
                 
@@ -94,7 +96,7 @@ def handle_text(message):
             elif response.status_code == 404:
                 bot.send_message(message.chat.id, "❌ Аккаунт с таким тегом не найден! Проверьте символы.")
             else:
-                bot.send_message(message.chat.id, f"❌ Не удалось найти аккаунт (Код: {response.status_code}).")
+                bot.send_message(message.chat.id, f"❌ Не удалось найти аккаунт (Код: {response.status_code}). Проверьте тег.")
         except Exception as e:
             bot.send_message(message.chat.id, f"❌ Ошибка соединения: {e}")
     else:
