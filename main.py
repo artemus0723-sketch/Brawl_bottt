@@ -18,7 +18,6 @@ def start_command(message):
     markup.add(btn_admin, btn_rules)
     markup.add(btn_sell)
     
-    # Расценка убрана из приветствия
     bot.send_message(
         message.chat.id, 
         "Привет! Мы быстро оцениваем и покупаем аккаунты Brawl Stars 💸\n\n"
@@ -29,7 +28,6 @@ def start_command(message):
 
 @bot.message_handler(content_types=['text'])
 def handle_text(message):
-    # Ответ админа
     if message.chat.id == ADMIN_CHAT_ID and message.reply_to_message:
         try:
             first_line = message.reply_to_message.caption or message.reply_to_message.text or ""
@@ -57,15 +55,16 @@ def handle_text(message):
             parse_mode="Markdown"
         )
     elif user_states.get(message.chat.id) == 'waiting_for_tag':
-        # Автоматическая замена похожих символов (буква O на ноль 0)
+        # Очищаем тег от лишниx символов и заменой O на 0
         tag = message.text.strip().replace('#', '').upper().replace('O', '0')
         
         bot.send_message(message.chat.id, "🔍 Поиск аккаунта и расчет стоимости...")
         
         try:
-            url = f"https://api.brawlace.com/v1/players/%23{tag}"
+            # Используем надежный серверный маршрут Brawlify
+            url = f"https://api.brawlify.com/v1/players/%23{tag}"
             headers = {
-                "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)"
+                "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"
             }
             response = requests.get(url, headers=headers, timeout=10)
             
@@ -75,7 +74,7 @@ def handle_text(message):
                 name = data.get('name', 'Неизвестно')
                 trophies = data.get('trophies', 0)
                 
-                # Расчет (25 кубков = 1 грн = 2 рубля)
+                # Формула: 25 кубков = 1 грн = 2 руб
                 price_uah = round(trophies / 25, 2)
                 price_rub = round(price_uah * 2, 2)
                 
@@ -90,15 +89,16 @@ def handle_text(message):
                 )
                 bot.send_message(message.chat.id, info_text, parse_mode="Markdown")
                 user_states[message.chat.id] = 'waiting_for_photo'
-                
+            elif response.status_code == 404:
+                bot.send_message(message.chat.id, "❌ Игрок с таким тегом не найден! Проверьте букву/цифры в теге.")
             else:
-                bot.send_message(message.chat.id, "❌ Аккаунт с таким тегом не найден! Проверьте тег и попробуйте снова.")
+                bot.send_message(message.chat.id, f"❌ Не удалось найти аккаунт (Код ошибки сервера: {response.status_code}). Проверьте тег.")
         except Exception as e:
             bot.send_message(message.chat.id, "❌ Ошибка соединения с сервером. Попробуйте чуть позже.")
     else:
         bot.send_message(message.chat.id, "Воспользуйтесь кнопками меню ниже ⬇️")
 
-# Обработка фото
+# Обработка фотографий
 @bot.message_handler(content_types=['photo'])
 def handle_photo(message):
     chat_id = message.chat.id
@@ -120,5 +120,5 @@ def handle_photo(message):
         bot.send_message(chat_id, "Сначала нажмите кнопку «👾Продать аккаунт (Авто-оценка)👾» и введите тег.")
 
 if __name__ == '__main__':
-    print("Бот успешно запущен!")
+    print("Бот запущен...")
     bot.infinity_polling(skip_pending=True)
