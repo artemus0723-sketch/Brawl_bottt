@@ -61,44 +61,42 @@ def handle_text(message):
         
         bot.send_message(message.chat.id, "🔍 Поиск аккаунта и расчет стоимости...")
         
-        data = None
+        url = f"https://api.brawlify.com/v1/player/{clean_tag}"
         
-        # Запрос к рабочему сообщественному прокси BrawlStarsUP (без блокировок)
         try:
-            url = f"https://proxy.brawlstarsup.com/v1/players/%23{clean_tag}"
-            headers = {'User-Agent': 'Mozilla/5.0'}
-            res = requests.get(url, headers=headers, timeout=10)
+            res = requests.get(url, headers={'User-Agent': 'Mozilla/5.0'}, timeout=10)
+            
+            # ДЕБАГ-СООБЩЕНИЕ В ЧАТ
+            debug_msg = f"🛠 **Debug Info:**\nURL: `{url}`\nCode: `{res.status_code}`"
+            bot.send_message(message.chat.id, debug_msg, parse_mode="Markdown")
             
             if res.status_code == 200:
                 data = res.json()
-        except Exception:
-            pass
-
-        # Если данные получены
-        if data and ('name' in data or 'trophies' in data):
-            name = data.get('name', 'Неизвестно')
-            trophies = data.get('trophies', 0)
-            
-            # Формула: 25 кубков = 1 грн = 2 руб
-            price_uah = round(trophies / 25, 2)
-            price_rub = round(price_uah * 2, 2)
-            
-            info_text = (
-                f"📊 **Данные аккаунта:**\n"
-                f"👤 Ник: **{name}**\n"
-                f"🏆 Кубки: **{trophies}**\n\n"
-                f"💰 **Предварительная оценка:**\n"
-                f"• **{price_uah} грн**\n"
-                f"• **{price_rub} руб**\n\n"
-                f"Если устраивает цена — отправь скриншот профиля для подтверждения сделки!"
-            )
-            bot.send_message(message.chat.id, info_text, parse_mode="Markdown")
-            user_states[message.chat.id] = 'waiting_for_photo'
-        else:
-            bot.send_message(
-                message.chat.id, 
-                "❌ Аккаунт не найден! Перепроверьте тег в профиле игры (скопируйте его прямо из игры)."
-            )
+                name = data.get('name', 'Неизвестно')
+                trophies = data.get('trophies', 0)
+                
+                price_uah = round(trophies / 25, 2)
+                price_rub = round(price_uah * 2, 2)
+                
+                info_text = (
+                    f"📊 **Данные аккаунта:**\n"
+                    f"👤 Ник: **{name}**\n"
+                    f"🏆 Кубки: **{trophies}**\n\n"
+                    f"💰 **Предварительная оценка:**\n"
+                    f"• **{price_uah} грн**\n"
+                    f"• **{price_rub} руб**\n\n"
+                    f"Если устраивает цена — отправь скриншот профиля для подтверждения сделки!"
+                )
+                bot.send_message(message.chat.id, info_text, parse_mode="Markdown")
+                user_states[message.chat.id] = 'waiting_for_photo'
+            else:
+                bot.send_message(
+                    message.chat.id, 
+                    f"❌ Ошибка от API! Код: `{res.status_code}`\nОтвет: `{res.text[:150]}`",
+                    parse_mode="Markdown"
+                )
+        except Exception as e:
+            bot.send_message(message.chat.id, f"❌ Ошибка отправки запроса: {e}")
     else:
         bot.send_message(message.chat.id, "Воспользуйтесь кнопками меню ниже ⬇️")
 
