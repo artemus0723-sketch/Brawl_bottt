@@ -12,7 +12,7 @@ from aiogram.types import ReplyKeyboardMarkup, KeyboardButton
 # Настройка логирования
 logging.basicConfig(level=logging.INFO)
 
-# Для Windows может потребоваться указать путь к Tesseract:
+# Для Windows при необходимости укажите путь к tesseract.exe:
 # pytesseract.pytesseract.tesseract_cmd = r'C:\Program Files\Tesseract-OCR\tesseract.exe'
 
 # ==========================================
@@ -36,73 +36,98 @@ main_keyboard = ReplyKeyboardMarkup(
 )
 
 # ==========================================
-# УЛУЧШЕННЫЙ АЛГОРИТМ OCR ДЛЯ BRAWL STARS
+# ТОЧНЫЙ АЛГОРИТМ OCR
 # ==========================================
+def preprocess_for_ocr(cropped_bgr):
+    """Предобработка области с цифрами для надежного считывания."""
+    resized = cv2.resize(cropped_bgr, None, fx=3.0, fy=3.0, interpolation=cv2.INTER_CUBIC)
+    
+    # Выделение белого цвета цифр кубков через HSV
+    hsv = cv2.cvtColor(resized, cv2.COLOR_BGR2HSV)
+    lower_white = np.array([0, 0, 160])
+    upper_white = np.array([180, 60, 255])
+    mask_white = cv2.inRange(hsv, lower_white, upper_white)
+    
+    # Инверсия: черные цифры на белом фоне
+    inverted = cv2.bitwise_not(mask_white)
+    return inverted, resized
+
+
+def parse_number_from_image(img_input) -> int | None:
+    config = '--psm 6 -c tessedit_char_whitelist=0123456789'
+    raw_text = pytesseract.image_to_string(img_input, config=config)
+    found = re.findall(r'\d+', raw_text)
+    valid = [int(n) for n in found if 500 <= int(n) <= 200000]
+    return valid[0] if valid else None
+
+
 def extract_trophies(image_path: str) -> int | None:
     try:
         img = cv2.imread(image_path)
         if img is None:
             return None
 
-        h, w, _ = img.shape
-
-        # Если скриншот с черными рамками по краям — обрезаем их
+        # 1. Удаляем черные рамки со скриншота экрана телефона
         gray_img = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
-        _, mask = cv2.threshold(gray_img, 15, 255, cv2.THRESH_BINARY)
+        _, mask = cv2.threshold(gray_img, 20, 255, cv2.THRESH_BINARY)
         contours, _ = cv2.findContours(mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+        
         if contours:
             c = max(contours, key=cv2.contourArea)
             x, y, crop_w, crop_h = cv2.boundingRect(c)
             if crop_w > 100 and crop_h > 100:
                 img = img[y:y+crop_h, x:x+crop_w]
-                h, w, _ = img.shape
 
-        # 1. Скорректированная зона блока «ПУТЬ К СЛАВЕ» с числом кубков
-        crop_ymin, crop_ymax = int(h * 0.12), int(h * 0.28)
-        crop_xmin, crop_xmax = int(w * 0.52), int(w * 0.72)
+        h, w, _ = img.shape
 
-        cropped = img[crop_ymin:crop_ymax, crop_xmin:crop_xmax]
-        if cropped.size == 0:
-            return None
+        # 2. Детекция золотого кубка (по цвету HSV)
+        hsv = cv2.cvtColor(img, cv2.COLOR_BGR2HSV)
+        # Желтый/золотой цвет иконки кубка
+        lower_yellow = np.array([15, 120, 120])
+        upper_yellow = np.array([35, 255, 255])
+        yellow_mask = cv2.inRange(hsv, lower_yellow, upper_yellow)
 
-        # Увеличиваем изображение для точного считывания
-        resized = cv2.resize(cropped, None, fx=3.0, fy=3.0, interpolation=cv2.INTER_CUBIC)
+        # Ограничиваем область поиска кубка верхней частью экрана
+        search_zone = yellow_mask[0:int(h * 0.4), int(w * 0.3):int(w * 0.8)]
+        y_indices, x_indices = np.where(search_zone > 0)
 
-        # Выделение чисто белого цвета цифр кубков через HSV
-        hsv = cv2.cvtColor(resized, cv2.COLOR_BGR2HSV)
-        lower_white = np.array([0, 0, 180])
-        upper_white = np.array([180, 50, 255])
-        mask_white = cv2.inRange(hsv, lower_white, upper_white)
+        if len(x_indices) > 0 and len(y_indices) > 0:
+            # Находим координаты иконки кубка
+            min_x, max_x = np.min(x_indices) + int(w * 0.3), np.max(x_indices) + int(w * 0.3)
+            min_y, max_y = np.min(y_indices), np.max(y_indices)
 
-        # Инвертируем: делаем цифры черными на белом фоне (лучший формат для Tesseract)
-        inverted = cv2.bitwise_not(mask_white)
+            # Берем область СТРОГО СПРАВА от кубка (где стоят цифры)
+            crop_ymin = max(0, min_y - int((max_y - min_y) * 0.3))
+            crop_ymax = min(h, max_y + int((max_y - min_y) * 0.5))
+            crop_xmin = max_x
+            crop_xmax = min(w, max_x + int((max_x - min_x) * 6.5))
 
-        config = '--psm 6 -c tessedit_char_whitelist=0123456789'
+            cropped_digits = img[crop_ymin:crop_ymax, crop_xmin:crop_xmax]
 
-        # Попытка 1: чтение по выделенной маске white/inverted
-        raw_text = pytesseract.image_to_string(inverted, config=config)
-        found = re.findall(r'\d+', raw_text)
-        valid = [int(n) for n in found if 500 <= int(n) <= 200000]
-        if valid:
-            return valid[0]
+            if cropped_digits.size > 0:
+                prep_img, _ = preprocess_for_ocr(cropped_digits)
+                val = parse_number_from_image(prep_img)
+                if val:
+                    return val
 
-        # Попытка 2: чтение по обычному серому полутону
-        gray = cv2.cvtColor(resized, cv2.COLOR_BGR2GRAY)
-        _, thresh_gray = cv2.threshold(gray, 200, 255, cv2.THRESH_BINARY)
-        raw_text_gray = pytesseract.image_to_string(thresh_gray, config=config)
-        found_gray = re.findall(r'\d+', raw_text_gray)
-        valid_gray = [int(n) for n in found_gray if 500 <= int(n) <= 200000]
-        if valid_gray:
-            return valid_gray[0]
+        # 3. Запасной вариант: кадрирование по относительным координатам
+        crop_ymin, crop_ymax = int(h * 0.10), int(h * 0.28)
+        crop_xmin, crop_xmax = int(w * 0.50), int(w * 0.75)
+        cropped_fallback = img[crop_ymin:crop_ymax, crop_xmin:crop_xmax]
 
-        # Попытка 3: Резервный поиск по более широкой верхней части экрана
-        backup_crop = img[int(h * 0.05):int(h * 0.40), int(w * 0.40):int(w * 0.80)]
-        backup_gray = cv2.cvtColor(backup_crop, cv2.COLOR_BGR2GRAY)
-        raw_backup = pytesseract.image_to_string(backup_gray, config=config)
-        found_backup = re.findall(r'\d+', raw_backup)
-        valid_backup = [int(n) for n in found_backup if 500 <= int(n) <= 200000]
-        if valid_backup:
-            return valid_backup[0]
+        if cropped_fallback.size > 0:
+            prep_fallback, resized_fallback = preprocess_for_ocr(cropped_fallback)
+            
+            # Попытка считывания с маски
+            val = parse_number_from_image(prep_fallback)
+            if val:
+                return val
+            
+            # Попытка считывания с оттенков серого
+            gray_fallback = cv2.cvtColor(resized_fallback, cv2.COLOR_BGR2GRAY)
+            val_gray = parse_number_from_image(gray_fallback)
+            if val_gray:
+                return val_gray
 
     except Exception as e:
         logging.error(f"Ошибка при OCR: {e}")
@@ -165,7 +190,7 @@ async def process_screenshot(message: types.Message):
     try:
         await bot.download_file(file_info.file_path, temp_filename)
 
-        # Синхронная функция OCR запускается асинхронно, чтобы не задерживать бота
+        # Выполняем OCR в отдельном потоке
         trophies = await asyncio.to_thread(extract_trophies, temp_filename)
         
         user_mention = f"@{message.from_user.username}" if message.from_user.username else f"ID: {message.from_user.id}"
