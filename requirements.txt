@@ -1,4 +1,6 @@
-opencv-python-headless
 aiogram
-pytesseract
+easyocr
+opencv-python-headless
+numpy
+
 
