@@ -1,10 +1,10 @@
 import os
 import re
 import cv2
+import pytesseract
 import logging
 import asyncio
 import numpy as np
-import easyocr
 from aiogram import Bot, Dispatcher, F, types
 from aiogram.filters import CommandStart
 from aiogram.types import ReplyKeyboardMarkup, KeyboardButton
@@ -12,9 +12,8 @@ from aiogram.types import ReplyKeyboardMarkup, KeyboardButton
 # Настройка логирования
 logging.basicConfig(level=logging.INFO)
 
-# Инициализируем модель EasyOCR для русского и английского языков (загружается 1 раз при старте)
-# gpu=False использует CPU (поставьте gpu=True, если есть видеокарта Nvidia)
-reader = easyocr.Reader(['ru', 'en'], gpu=False)
+# Для Windows при необходимости укажите путь к tesseract.exe:
+# pytesseract.pytesseract.tesseract_cmd = r'C:\Program Files\Tesseract-OCR\tesseract.exe'
 
 # ==========================================
 # ПОЛУЧЕНИЕ ПЕРЕМЕННЫХ
@@ -37,54 +36,101 @@ main_keyboard = ReplyKeyboardMarkup(
 )
 
 # ==========================================
-# НАДЁЖНЫЙ АЛГОРИТМ OCR НА БАЗЕ EASYOCR
+# ТОЧНЫЙ АЛГОРИТМ OCR
 # ==========================================
-def extract_trophies_easyocr(image_path: str) -> int | None:
+def preprocess_for_ocr(cropped_bgr):
+    """Предобработка области с цифрами для надежного считывания."""
+    resized = cv2.resize(cropped_bgr, None, fx=3.0, fy=3.0, interpolation=cv2.INTER_CUBIC)
+    
+    # Выделение белого цвета цифр кубков через HSV
+    hsv = cv2.cvtColor(resized, cv2.COLOR_BGR2HSV)
+    lower_white = np.array([0, 0, 160])
+    upper_white = np.array([180, 60, 255])
+    mask_white = cv2.inRange(hsv, lower_white, upper_white)
+    
+    # Инверсия: черные цифры на белом фоне
+    inverted = cv2.bitwise_not(mask_white)
+    return inverted, resized
+
+
+def parse_number_from_image(img_input) -> int | None:
+    config = '--psm 6 -c tessedit_char_whitelist=0123456789'
+    raw_text = pytesseract.image_to_string(img_input, config=config)
+    found = re.findall(r'\d+', raw_text)
+    valid = [int(n) for n in found if 500 <= int(n) <= 200000]
+    return valid[0] if valid else None
+
+
+def extract_trophies(image_path: str) -> int | None:
     try:
         img = cv2.imread(image_path)
         if img is None:
             return None
 
-        # 1. Обрезаем черные рамки телефона по краям (если они есть)
-        gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
-        _, mask = cv2.threshold(gray, 20, 255, cv2.THRESH_BINARY)
+        # 1. Удаляем черные рамки со скриншота экрана телефона
+        gray_img = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
+        _, mask = cv2.threshold(gray_img, 20, 255, cv2.THRESH_BINARY)
         contours, _ = cv2.findContours(mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+        
         if contours:
             c = max(contours, key=cv2.contourArea)
             x, y, crop_w, crop_h = cv2.boundingRect(c)
             if crop_w > 100 and crop_h > 100:
                 img = img[y:y+crop_h, x:x+crop_w]
 
-        # 2. Запускаем распознавание с помощью EasyOCR
-        # EasyOCR возвращает список: [ [bbox, text, confidence], ... ]
-        results = reader.readtext(img)
+        h, w, _ = img.shape
 
-        candidates = []
-        
-        # Сканируем все найденные блоки текста
-        for bbox, text, prob in results:
-            # Очищаем текст, оставляем только цифры
-            clean_text = re.sub(r'\D', '', text)
-            if clean_text:
-                val = int(clean_text)
-                # Кубки обычно находятся в диапазоне от 500 до 200,000
-                if 500 <= val <= 200000:
-                    # Получаем Y-координату центра найденного блока
-                    top_y = bbox[0][1]
-                    candidates.append((val, top_y, prob))
+        # 2. Детекция золотого кубка (по цвету HSV)
+        hsv = cv2.cvtColor(img, cv2.COLOR_BGR2HSV)
+        # Желтый/золотой цвет иконки кубка
+        lower_yellow = np.array([15, 120, 120])
+        upper_yellow = np.array([35, 255, 255])
+        yellow_mask = cv2.inRange(hsv, lower_yellow, upper_yellow)
 
-        if not candidates:
-            return None
+        # Ограничиваем область поиска кубка верхней частью экрана
+        search_zone = yellow_mask[0:int(h * 0.4), int(w * 0.3):int(w * 0.8)]
+        y_indices, x_indices = np.where(search_zone > 0)
 
-        # Кубки в профиле Brawl Stars («ПУТЬ К СЛАВЕ») всегда находятся в ВЕРХНЕЙ части экрана
-        # Сортируем кандидатов по Y-координате (чем выше на экране, тем вероятнее это кубки)
-        candidates.sort(key=lambda item: item[1])
+        if len(x_indices) > 0 and len(y_indices) > 0:
+            # Находим координаты иконки кубка
+            min_x, max_x = np.min(x_indices) + int(w * 0.3), np.max(x_indices) + int(w * 0.3)
+            min_y, max_y = np.min(y_indices), np.max(y_indices)
 
-        # Возвращаем первое подходящее число из верхней зоны
-        return candidates[0][0]
+            # Берем область СТРОГО СПРАВА от кубка (где стоят цифры)
+            crop_ymin = max(0, min_y - int((max_y - min_y) * 0.3))
+            crop_ymax = min(h, max_y + int((max_y - min_y) * 0.5))
+            crop_xmin = max_x
+            crop_xmax = min(w, max_x + int((max_x - min_x) * 6.5))
+
+            cropped_digits = img[crop_ymin:crop_ymax, crop_xmin:crop_xmax]
+
+            if cropped_digits.size > 0:
+                prep_img, _ = preprocess_for_ocr(cropped_digits)
+                val = parse_number_from_image(prep_img)
+                if val:
+                    return val
+
+        # 3. Запасной вариант: кадрирование по относительным координатам
+        crop_ymin, crop_ymax = int(h * 0.10), int(h * 0.28)
+        crop_xmin, crop_xmax = int(w * 0.50), int(w * 0.75)
+        cropped_fallback = img[crop_ymin:crop_ymax, crop_xmin:crop_xmax]
+
+        if cropped_fallback.size > 0:
+            prep_fallback, resized_fallback = preprocess_for_ocr(cropped_fallback)
+            
+            # Попытка считывания с маски
+            val = parse_number_from_image(prep_fallback)
+            if val:
+                return val
+            
+            # Попытка считывания с оттенков серого
+            gray_fallback = cv2.cvtColor(resized_fallback, cv2.COLOR_BGR2GRAY)
+            val_gray = parse_number_from_image(gray_fallback)
+            if val_gray:
+                return val_gray
 
     except Exception as e:
-        logging.error(f"Ошибка при работе EasyOCR: {e}")
+        logging.error(f"Ошибка при OCR: {e}")
 
     return None
 
@@ -144,8 +190,8 @@ async def process_screenshot(message: types.Message):
     try:
         await bot.download_file(file_info.file_path, temp_filename)
 
-        # Обработка изображения нейросетью EasyOCR в отдельном потоке
-        trophies = await asyncio.to_thread(extract_trophies_easyocr, temp_filename)
+        # Выполняем OCR в отдельном потоке
+        trophies = await asyncio.to_thread(extract_trophies, temp_filename)
         
         user_mention = f"@{message.from_user.username}" if message.from_user.username else f"ID: {message.from_user.id}"
 
