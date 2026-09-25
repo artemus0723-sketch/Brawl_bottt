@@ -4,12 +4,16 @@ import cv2
 import pytesseract
 import logging
 import asyncio
+import numpy as np
 from aiogram import Bot, Dispatcher, F, types
 from aiogram.filters import CommandStart
 from aiogram.types import ReplyKeyboardMarkup, KeyboardButton
 
 # Настройка логирования
 logging.basicConfig(level=logging.INFO)
+
+# Для Windows может потребоваться указать путь к Tesseract:
+# pytesseract.pytesseract.tesseract_cmd = r'C:\Program Files\Tesseract-OCR\tesseract.exe'
 
 # ==========================================
 # ПОЛУЧЕНИЕ ПЕРЕМЕННЫХ
@@ -32,7 +36,7 @@ main_keyboard = ReplyKeyboardMarkup(
 )
 
 # ==========================================
-# ТОЧНЫЙ АЛГОРИТМ OCR ДЛЯ BRAWL STARS
+# УЛУЧШЕННЫЙ АЛГОРИТМ OCR ДЛЯ BRAWL STARS
 # ==========================================
 def extract_trophies(image_path: str) -> int | None:
     try:
@@ -42,58 +46,63 @@ def extract_trophies(image_path: str) -> int | None:
 
         h, w, _ = img.shape
 
-        # Если картинка вертикальная (скриншот экрана телефона с черными рамками)
-        # Убираем верхние и нижние черные поля
-        if h > w:
-            gray_img = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
-            _, mask = cv2.threshold(gray_img, 15, 255, cv2.THRESH_BINARY)
-            contours, _ = cv2.findContours(mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
-            if contours:
-                c = max(contours, key=cv2.contourArea)
-                x, y, crop_w, crop_h = cv2.boundingRect(c)
-                if crop_w > 100 and crop_h > 100:
-                    img = img[y:y+crop_h, x:x+crop_w]
-                    h, w, _ = img.shape
+        # Если скриншот с черными рамками по краям — обрезаем их
+        gray_img = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
+        _, mask = cv2.threshold(gray_img, 15, 255, cv2.THRESH_BINARY)
+        contours, _ = cv2.findContours(mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+        if contours:
+            c = max(contours, key=cv2.contourArea)
+            x, y, crop_w, crop_h = cv2.boundingRect(c)
+            if crop_w > 100 and crop_h > 100:
+                img = img[y:y+crop_h, x:x+crop_w]
+                h, w, _ = img.shape
 
-        # Точная зона блока «ПУТЬ К СЛАВЕ» (верхний центр-право)
-        crop_ymin, crop_ymax = int(h * 0.08), int(h * 0.35)
-        crop_xmin, crop_xmax = int(w * 0.48), int(w * 0.78)
+        # 1. Скорректированная зона блока «ПУТЬ К СЛАВЕ» с числом кубков
+        crop_ymin, crop_ymax = int(h * 0.12), int(h * 0.28)
+        crop_xmin, crop_xmax = int(w * 0.52), int(w * 0.72)
 
         cropped = img[crop_ymin:crop_ymax, crop_xmin:crop_xmax]
         if cropped.size == 0:
             return None
 
-        # Увеличиваем масштаб для идеального распознавания шрифта игры
-        resized = cv2.resize(cropped, None, fx=2.5, fy=2.5, interpolation=cv2.INTER_CUBIC)
-        gray = cv2.cvtColor(resized, cv2.COLOR_BGR2GRAY)
+        # Увеличиваем изображение для точного считывания
+        resized = cv2.resize(cropped, None, fx=3.0, fy=3.0, interpolation=cv2.INTER_CUBIC)
 
-        # Контрастная фильтрация (белые цифры на темном фоне)
-        _, thresh = cv2.threshold(gray, 180, 255, cv2.THRESH_BINARY)
+        # Выделение чисто белого цвета цифр кубков через HSV
+        hsv = cv2.cvtColor(resized, cv2.COLOR_BGR2HSV)
+        lower_white = np.array([0, 0, 180])
+        upper_white = np.array([180, 50, 255])
+        mask_white = cv2.inRange(hsv, lower_white, upper_white)
+
+        # Инвертируем: делаем цифры черными на белом фоне (лучший формат для Tesseract)
+        inverted = cv2.bitwise_not(mask_white)
 
         config = '--psm 6 -c tessedit_char_whitelist=0123456789'
-        
-        # 1. Попытка чтения с бинаризованного кадра
-        raw_text = pytesseract.image_to_string(thresh, config=config)
-        found_numbers = re.findall(r'\d+', raw_text)
 
-        # Отбираем только реальные значения кубков (от 500 до 200,000)
-        valid = [int(n) for n in found_numbers if 500 <= int(n) <= 200000]
+        # Попытка 1: чтение по выделенной маске white/inverted
+        raw_text = pytesseract.image_to_string(inverted, config=config)
+        found = re.findall(r'\d+', raw_text)
+        valid = [int(n) for n in found if 500 <= int(n) <= 200000]
         if valid:
             return valid[0]
 
-        # 2. Попытка чтения с оттенков серого (если порог срезaл грани)
-        raw_gray_text = pytesseract.image_to_string(gray, config=config)
-        found_gray_numbers = re.findall(r'\d+', raw_gray_text)
-        valid_gray = [int(n) for n in found_gray_numbers if 500 <= int(n) <= 200000]
+        # Попытка 2: чтение по обычному серому полутону
+        gray = cv2.cvtColor(resized, cv2.COLOR_BGR2GRAY)
+        _, thresh_gray = cv2.threshold(gray, 200, 255, cv2.THRESH_BINARY)
+        raw_text_gray = pytesseract.image_to_string(thresh_gray, config=config)
+        found_gray = re.findall(r'\d+', raw_text_gray)
+        valid_gray = [int(n) for n in found_gray if 500 <= int(n) <= 200000]
         if valid_gray:
             return valid_gray[0]
 
-        # 3. Резервный вариант: поиск по всему изображению
-        raw_full_text = pytesseract.image_to_string(img, config=config)
-        full_numbers = re.findall(r'\d+', raw_full_text)
-        valid_full = [int(n) for n in full_numbers if 500 <= int(n) <= 200000]
-        if valid_full:
-            return valid_full[0]
+        # Попытка 3: Резервный поиск по более широкой верхней части экрана
+        backup_crop = img[int(h * 0.05):int(h * 0.40), int(w * 0.40):int(w * 0.80)]
+        backup_gray = cv2.cvtColor(backup_crop, cv2.COLOR_BGR2GRAY)
+        raw_backup = pytesseract.image_to_string(backup_gray, config=config)
+        found_backup = re.findall(r'\d+', raw_backup)
+        valid_backup = [int(n) for n in found_backup if 500 <= int(n) <= 200000]
+        if valid_backup:
+            return valid_backup[0]
 
     except Exception as e:
         logging.error(f"Ошибка при OCR: {e}")
@@ -139,7 +148,7 @@ async def process_rules(message: types.Message):
     await message.answer(
         "📋 **Правила скупки:**\n\n"
         "1. Принимаются только оригинальные скриншоты профиля.\n"
-        "2. покупаем только от 5000🏆.\n"
+        "2. Покупаем только от 5000🏆.\n"
         "3. Окончательную сумму утверждает администратор.",
         parse_mode="Markdown"
     )
@@ -151,11 +160,14 @@ async def process_screenshot(message: types.Message):
     
     photo = message.photo[-1]
     file_info = await bot.get_file(photo.file_id)
-    temp_filename = f"temp_{message.from_user.id}.jpg"
-    await bot.download_file(file_info.file_path, temp_filename)
+    temp_filename = f"temp_{message.from_user.id}_{message.message_id}.jpg"
 
     try:
-        trophies = extract_trophies(temp_filename)
+        await bot.download_file(file_info.file_path, temp_filename)
+
+        # Синхронная функция OCR запускается асинхронно, чтобы не задерживать бота
+        trophies = await asyncio.to_thread(extract_trophies, temp_filename)
+        
         user_mention = f"@{message.from_user.username}" if message.from_user.username else f"ID: {message.from_user.id}"
 
         if trophies:
@@ -195,6 +207,9 @@ async def process_screenshot(message: types.Message):
                 caption=f"⚠️ **Ошибка OCR!** Скриншот от {user_mention} (`{message.from_user.id}`). Требуется ручная оценка.",
                 parse_mode="Markdown"
             )
+    except Exception as e:
+        logging.error(f"Ошибка при обработке скриншота: {e}")
+        await status_msg.edit_text("❌ Произошла ошибка при обработке скриншота.")
     finally:
         if os.path.exists(temp_filename):
             os.remove(temp_filename)
